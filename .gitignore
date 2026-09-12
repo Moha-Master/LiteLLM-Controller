@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Environments
+venv/
+.venv/
+env/
+
+# Config & Data (Local)
+.config/
+config.yaml
+model_metadata/
+model_prices_and_context_window.json
