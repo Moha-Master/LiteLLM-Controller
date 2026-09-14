@@ -225,7 +225,7 @@ def models_module():
             choices.append(Choice(model_id_of(m), name=row))
         choices.append(_separator())
         choices.append(Choice(ADD_MODEL_ACTION, name="添加模型"))
-        choices.append(Choice("metadata", name="模型元数据管理"))
+        choices.append(Choice("metadata", name="模型参数管理"))
         choices.append(Choice("sort", name=f"排序设置 [{SORT_OPTIONS[_sort_key]}]"))
         choices.append(Choice("refresh", name="刷新模型列表"))
         choices.append(Choice(None, name="[返回主菜单]"))

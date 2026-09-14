@@ -32,13 +32,13 @@ def parse_args():
     subparsers = parser.add_subparsers(dest="command")
     gen_parser = subparsers.add_parser(
         "metadata-gen",
-        help="执行构建流程并导出 model_prices_and_context_window.json（非交互）",
+        help="生成 model_prices_and_context_window.json",
     )
     gen_parser.add_argument(
         "path",
         nargs="?",
         default=None,
-        help="输出目录（可选，仅目录；缺省使用 config.yaml 的 output_file，"
+        help="输出目录（可选，缺省使用 config.yaml 的 output_file，"
              "文件名固定为 model_prices_and_context_window.json）",
     )
     return parser.parse_args()

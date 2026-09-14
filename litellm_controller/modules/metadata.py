@@ -1,4 +1,4 @@
-"""模型元数据管理模块：基于 Python 脚本的元数据源发现、优先级合并与可视化编辑。"""
+"""模型参数管理模块：基于 Python 脚本的参数源发现、优先级合并与可视化编辑。"""
 import ast
 import copy
 import json
@@ -23,7 +23,7 @@ EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 # 最终导出 JSON 的固定文件名
 OUTPUT_FILENAME = "model_prices_and_context_window.json"
 
-# ---------------------------------------------------------------- 脚本元数据解析
+# ---------------------------------------------------------------- 脚本参数解析
 
 @dataclass
 class ScriptMeta:
@@ -134,12 +134,12 @@ def update_script_priority(path: Path, priority: int):
 
 DEFAULT_PY_TEMPLATE = """#!/usr/bin/env python3
 # --- LITELLMCTL CONFIG ---
-NAME = "默认元数据配置"
-DESCRIPTION = "由可视化编辑器维护的本地模型元数据"
+NAME = "默认参数配置"
+DESCRIPTION = "由可视化编辑器维护的本地模型参数"
 PRIORITY = 0
 ENABLED = True
 # -------------------------
-\"\"\"由 litellmctl 可视化编辑器维护的本地模型定价与上下文元数据。\"\"\"
+\"\"\"由 litellmctl 可视化编辑器维护的本地模型定价与上下文参数。\"\"\"
 import json
 import sys
 
@@ -259,20 +259,20 @@ class MetadataManager:
         return data
 
     def build(self) -> tuple[dict[str, Any], list[str]]:
-        """构建最终的元数据字典。执行所有启用脚本，按优先级从小到大合并。"""
+        """构建最终的参数字典。执行所有启用脚本，按优先级从小到大合并。"""
         logs = []
         final_map = {}
         
         # 1. Base: amend_upstream
         amend = self.config["model_metadata"].get("amend_upstream", {})
         if amend.get("type") != "off":
-            logs.append(f"正在加载基底 amend_upstream ({amend['type']})...")
+            logs.append(f"正在加载基础列表 ({amend['type']})...")
             try:
                 base_data = self._fetch_amend_base()
                 final_map.update(base_data)
-                logs.append(f"  成功加载 {len(base_data)} 个基底条目")
+                logs.append(f"  成功加载 {len(base_data)} 个条目")
             except Exception as e:
-                logs.append(f"  加载基底失败: {e}")
+                logs.append(f"  加载基础列表失败: {e}")
 
         # 2. Discover and sort enabled scripts
         scripts: list[ScriptMeta] = []
@@ -290,37 +290,29 @@ class MetadataManager:
         model_origin: dict[str, tuple[ScriptMeta, int]] = {}
 
         for meta in scripts:
-            try:
-                if os.name != "nt" and not os.access(meta.path, os.X_OK):
-                    os.chmod(meta.path, 0o755)
+            data, error, stderr = run_script(meta.path, timeout=60)
+            
+            if error:
+                logs.append(f"  脚本 [{meta.name}] {error}")
+                if stderr:
+                    logs.append(f"  详细信息:\n{stderr}")
+                continue
+            
+            # 冲突检测与合并
+            for k, v in data.items():
+                if k in final_map:
+                    prev_meta, prev_prio = model_origin.get(k, (None, -1))
+                    if prev_prio == meta.priority:
+                        logs.append(f"  警告: 模型 [{k}] 在同优先级 (PRIORITY={meta.priority}) 脚本 [{prev_meta.name if prev_meta else '基础列表'}] 和 [{meta.name}] 中重叠，已由后者覆盖")
                 
-                result = subprocess.run(
-                    [sys.executable, str(meta.path)],
-                    capture_output=True, text=True, timeout=60, check=True,
-                )
-                data = json.loads(result.stdout)
-                if not isinstance(data, dict):
-                    logs.append(f"  脚本 [{meta.name}] 输出格式错误，跳过。")
-                    continue
+                # 自动补全 litellm_provider (以脚本 stem 为准，除非脚本自定)
+                if isinstance(v, dict) and "litellm_provider" not in v:
+                    v["litellm_provider"] = meta.path.stem
                 
-                # 冲突检测与合并
-                for k, v in data.items():
-                    if k in final_map:
-                        prev_meta, prev_prio = model_origin.get(k, (None, -1))
-                        if prev_prio == meta.priority:
-                            logs.append(f"  警告: 模型 [{k}] 在同优先级 (PRIORITY={meta.priority}) 脚本 [{prev_meta.name if prev_meta else '基底'}] 和 [{meta.name}] 中重叠，已由后者覆盖")
-                    
-                    # 自动补全 litellm_provider (以脚本 stem 为准，除非脚本自定)
-                    if isinstance(v, dict) and "litellm_provider" not in v:
-                        v["litellm_provider"] = meta.path.stem
-                    
-                    model_origin[k] = (meta, meta.priority)
-                
-                deep_merge(final_map, data)
-                logs.append(f"已执行 [{meta.name}] -> {len(data)} 个模型条目 (PRIORITY={meta.priority})")
-                
-            except Exception as e:
-                logs.append(f"  脚本 [{meta.name}] 执行或解析失败: {e}")
+                model_origin[k] = (meta, meta.priority)
+            
+            deep_merge(final_map, data)
+            logs.append(f"已执行 [{meta.name}] -> {len(data)} 个模型条目 (PRIORITY={meta.priority})")
 
         return final_map, logs
 
@@ -339,7 +331,7 @@ class MetadataManager:
         try:
             current_map = self.client.fetch_model_cost_map()
         except Exception:
-            return ["无法获取 Proxy 当前元数据，跳过对比。"]
+            return ["无法获取 Proxy 当前参数，跳过对比。"]
         
         diffs = []
         all_keys = set(new_data.keys()) | set(current_map.keys())
@@ -360,11 +352,11 @@ class MetadataManager:
                 if is_changed:
                     changed += 1
         
-        diffs.append("对比结果 (vs Proxy 当前加载):")
+        diffs.append("变动:")
         diffs.append(f"  新增条目: {added}")
         diffs.append(f"  修改条目: {changed}")
-        diffs.append(f"  移除条目: {removed} (Proxy 中原有但新 JSON 中缺失)")
-        diffs.append(f"  最终总计: {len(new_data)} 条 (Proxy 当前为 {len(current_map)} 条)")
+        diffs.append(f"  移除条目: {removed}")
+        diffs.append(f"  最终总计: {len(new_data)} 条")
         return diffs
 
 # ---------------------------------------------------------------- 命令行生成
@@ -411,16 +403,16 @@ def metadata_module(client: LiteLLMClient, config: dict):
     
     while True:
         choices = [
-            Choice("build", name="1. 构建并导出元数据 (Build & Export)"),
-            Choice("edit_default", name="2. 可视化编辑默认模型配置 (Edit default.py)"),
-            Choice("manage_scripts", name="3. 元数据脚本管理 (Manage Metadata Scripts)"),
-            Choice("inspect", name="4. 元数据预览与 Diff (Inspect & Diff)"),
+            Choice("build", name="1. 构建模型参数"),
+            Choice("edit_default", name="2. 编辑默认配置"),
+            Choice("manage_scripts", name="3. 脚本管理"),
+            Choice("inspect", name="4. 预览模型参数"),
             Choice(None, name="[返回模型管理]"),
         ]
         
         result = ask([{
             "type": "list",
-            "message": "模型元数据管理:",
+            "message": "模型参数管理:",
             "choices": choices,
             "name": "action",
             "long_instruction": "↑↓ 移动 · 回车 确认 · Ctrl+C 返回",
@@ -474,35 +466,98 @@ def do_build(mgr: MetadataManager):
 
 # ---------------------------------------------------------------- default.py 可视化编辑
 
-def read_default_py_data(path: Path) -> dict:
-    """运行 default.py 获取其当前 DATA 字典。如果文件不存在或异常则返回空字典。"""
+def run_script(path: Path, timeout: int = 60) -> tuple[dict, Optional[str], Optional[str]]:
+    """运行 Python 脚本并返回其输出的 JSON 数据。
+    
+    返回 (data, error_message, stderr_output)：
+    - 成功时返回 (数据字典, None, stderr 日志)
+    - 失败时返回 ({}, 错误描述, stderr 输出)
+    """
     if not path.exists():
-        return {}
+        return {}, f"脚本文件不存在: {path}", None
+    
     try:
         if os.name != "nt" and not os.access(path, os.X_OK):
             os.chmod(path, 0o755)
+        
         res = subprocess.run(
             [sys.executable, str(path)],
-            capture_output=True, text=True, timeout=15, check=True
+            capture_output=True, text=True, timeout=timeout
         )
+        
+        stderr_output = res.stderr.strip() if res.stderr else None
+        
+        if res.returncode != 0:
+            return {}, f"脚本执行失败 (退出码 {res.returncode})", stderr_output
+        
         data = json.loads(res.stdout)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    return {}
+        if not isinstance(data, dict):
+            return {}, "脚本输出格式错误：期望字典但得到其他类型", stderr_output
+        
+        return data, None, stderr_output
+    
+    except json.JSONDecodeError as e:
+        return {}, f"脚本输出的 JSON 格式错误: {e}", None
+    except subprocess.TimeoutExpired:
+        return {}, f"脚本执行超时 (超过 {timeout} 秒)", None
+    except Exception as e:
+        return {}, f"执行脚本时发生异常: {e}", None
+
+
+def read_default_py_data(path: Path) -> tuple[dict, Optional[str]]:
+    """运行 default.py 获取其当前 DATA 字典。
+    
+    返回 (data, error_message)：
+    - 成功时返回 (数据字典, None)
+    - 失败时返回 ({}, 错误描述)
+    """
+    data, error, _ = run_script(path, timeout=15)
+    return data, error
+
+def _json_to_python_repr(obj, indent=2, _level=0):
+    """将 Python 对象转换为 Python 源码格式的字符串（保留 True/False/None）。"""
+    if obj is True:
+        return "True"
+    if obj is False:
+        return "False"
+    if obj is None:
+        return "None"
+    if isinstance(obj, str):
+        return json.dumps(obj, ensure_ascii=False)
+    if isinstance(obj, (int, float)):
+        return repr(obj)
+    if isinstance(obj, list):
+        if not obj:
+            return "[]"
+        items = []
+        prefix = " " * indent * (_level + 1)
+        for item in obj:
+            items.append(prefix + _json_to_python_repr(item, indent, _level + 1))
+        return "[\n" + ",\n".join(items) + "\n" + " " * indent * _level + "]"
+    if isinstance(obj, dict):
+        if not obj:
+            return "{}"
+        items = []
+        for k, v in obj.items():
+            key_repr = json.dumps(k, ensure_ascii=False)
+            val_repr = _json_to_python_repr(v, indent, _level + 1)
+            items.append(" " * indent * (_level + 1) + f"{key_repr}: {val_repr}")
+        return "{\n" + ",\n".join(items) + "\n" + " " * indent * _level + "}"
+    return repr(obj)
+
 
 def save_default_py(path: Path, data: dict):
     """保存模型字典回写至 default.py。保持头部配置。"""
     meta = parse_script_meta(path)
     header = format_header(meta.name, meta.description, meta.priority, meta.enabled)
+    py_data_str = _json_to_python_repr(data)
     content = (
         f"#!/usr/bin/env python3\n"
         f"{header}\n"
-        f'"""由 litellmctl 可视化编辑器维护的本地模型定价与上下文元数据。"""\n'
+        f'"""由 litellmctl 可视化编辑器维护的本地模型定价与上下文参数。"""\n'
         f"import json\n"
         f"import sys\n\n"
-        f"DATA = {json.dumps(data, ensure_ascii=False, indent=2)}\n\n\n"
+        f"DATA = {py_data_str}\n\n\n"
         f"def main():\n"
         f"    json.dump(DATA, sys.stdout, ensure_ascii=False, indent=2)\n"
         f'    sys.stdout.write("\\n")\n'
@@ -518,7 +573,16 @@ def edit_default_py(mgr: MetadataManager):
     if not default_py_path.exists():
         sync_example_scripts()
     
-    data = read_default_py_data(default_py_path)
+    data, error = read_default_py_data(default_py_path)
+    if error:
+        print(f"\n无法加载 default.py:\n{error}")
+        print("\n请修复文件后重试。")
+        try:
+            input("按回车键继续...")
+        except (KeyboardInterrupt, EOFError):
+            pass
+        return
+    
     old_data = copy.deepcopy(data)
     working_data = copy.deepcopy(data)
     
@@ -548,14 +612,14 @@ def edit_default_py(mgr: MetadataManager):
                 choices.append(Choice(k, name=f"{k:<35} {cfg_str}"))
         
         choices.append(FuzzySeparator("─" * 70))
-        choices.append(Choice("__add__", name="+ 选择并添加模型 (Provider/Upstream/手动输入)..."))
+        choices.append(Choice("__add__", name="+ 选择并添加模型"))
         choices.append(FuzzySeparator("─" * 70))
-        choices.append(Choice("__save__", name="保存修改 (Save)"))
-        choices.append(Choice("__cancel__", name="取消 (Cancel)"))
+        choices.append(Choice("__save__", name="保存修改"))
+        choices.append(Choice("__cancel__", name="取消"))
         
         res = ask([{
             "type": "fuzzy",
-            "message": f"可视化编辑 default.py (共 {len(working_data)} 个模型):",
+            "message": f"正在编辑默认配置，共 {len(working_data)} 个模型):",
             "choices": choices,
             "name": "action",
             "long_instruction": HINT_FUZZY,
@@ -576,10 +640,10 @@ def edit_default_py(mgr: MetadataManager):
             print("\n" + "=" * 40)
             print(f"变动概览: 添加 {added} 个 / 删除 {deleted} 个 / 修改 {changed} 个")
             print("=" * 40)
-            conf = ask([{"type": "confirm", "message": "确认保存修改至 default.py？", "name": "ok", "default": True}])
+            conf = ask([{"type": "confirm", "message": "保存修改？", "name": "ok", "default": True}])
             if conf and conf.get("ok"):
                 save_default_py(default_py_path, working_data)
-                print("已成功保存至 default.py。")
+                print("保存成功。")
                 break
         elif action == "__add__":
             _add_models_to_dict(mgr, working_data)
@@ -595,15 +659,15 @@ def _add_models_to_dict(mgr: MetadataManager, working_data: dict):
     from .models import fetch_upstream_models, fuzzy_picker
     
     choices = [
-        Choice("builtin", name="从 LiteLLM 内置 Provider 数据拉取模型 (多选)"),
-        Choice("upstream", name="从配置的 Upstream 实时拉取模型 (多选)"),
-        Choice("manual", name="手动输入模型 Key (支持逗号分隔)"),
+        Choice("builtin", name="从 LiteLLM 内置 Provider 数据拉取模型"),
+        Choice("upstream", name="从 Upstream 拉取模型"),
+        Choice("manual", name="手动输入模型名称，使用逗号分隔"),
         Choice(None, name="[返回]"),
     ]
     
     res = ask([{
         "type": "list",
-        "message": "请选择模型来源方式:",
+        "message": "请添加模型:",
         "choices": choices,
         "name": "source",
     }])
@@ -651,7 +715,7 @@ def _add_models_to_dict(mgr: MetadataManager, working_data: dict):
     elif source == "manual":
         val_res = ask([{
             "type": "input",
-            "message": "请输入模型 Key (例如 gpt-4o，多个可用英文逗号分隔):",
+            "message": "请输入模型名称，使用英文逗号分隔:",
             "name": "keys",
             "validate": lambda v: bool(v and v.strip()),
         }])
@@ -686,13 +750,13 @@ def manage_scripts(mgr: MetadataManager):
             ))
             
         choices.append(FuzzySeparator("─" * 70))
-        choices.append(Choice("add_script", name="+ 新建脚本文件..."))
-        choices.append(Choice("reset_all_examples", name="↺ 重新释放 / 重置所有内置示例脚本..."))
+        choices.append(Choice("add_script", name="新建脚本文件"))
+        choices.append(Choice("reset_all_examples", name="重置所有内置示例脚本..."))
         choices.append(Choice(None, name="[返回]"))
         
         res = ask([{
             "type": "fuzzy",
-            "message": f"模型元数据脚本管理 (共 {len(script_files)} 个脚本):",
+            "message": f"模型参数脚本管理 (共 {len(script_files)} 个脚本):",
             "choices": choices,
             "name": "sel",
             "long_instruction": HINT_FUZZY,
@@ -707,7 +771,7 @@ def manage_scripts(mgr: MetadataManager):
         elif sel == "reset_all_examples":
             conf = ask([{
                 "type": "confirm",
-                "message": "确认将所有内置示例脚本 (openrouter.py, deepseek.py, type_static_json.py) 重新释放覆盖？本地修改将被重置，并恢复为默认禁用状态。",
+                "message": "对内置脚本的本地修改将被重置，并恢复为默认状态，是否继续？",
                 "name": "ok",
                 "default": False,
             }])
@@ -723,7 +787,7 @@ def manage_scripts(mgr: MetadataManager):
                                     os.chmod(target, 0o755)
                                 except OSError:
                                     pass
-                    print("所有内置示例脚本已成功重置并初始化为禁用状态。")
+                    print("所有内置脚本已成功重置。")
         else:
             edit_script_item(mgr, mgr.meta_dir / sel)
 
@@ -769,7 +833,7 @@ def edit_script_item(mgr: MetadataManager, script_path: Path):
         elif act == "priority":
             p_res = ask([{
                 "type": "input",
-                "message": f"请输入脚本 [{script_path.name}] 的新优先级 (非负整数):",
+                "message": f"请输入脚本 [{script_path.name}] 的新优先级，不小于 0:",
                 "default": str(meta.priority),
                 "validate": lambda v: bool(v and v.strip().isdigit() and int(v.strip()) >= 0),
                 "invalid_message": "请输入大于或等于 0 的整数",
@@ -787,7 +851,7 @@ def edit_script_item(mgr: MetadataManager, script_path: Path):
             example_file = EXAMPLES_DIR / script_path.name
             conf = ask([{
                 "type": "confirm",
-                "message": f"确认将 {script_path.name} 重置为内置示例版本？这将覆盖本地改动并设为禁用。",
+                "message": f"确认将 {script_path.name} 重置为内置版本？",
                 "name": "ok",
                 "default": False,
             }])
@@ -801,11 +865,11 @@ def edit_script_item(mgr: MetadataManager, script_path: Path):
                         os.chmod(script_path, 0o755)
                     except OSError:
                         pass
-                print(f"脚本已成功重置为内置示例: {script_path.name}")
+                print(f"脚本已成功重置: {script_path.name}")
         elif act == "delete":
             conf = ask([{
                 "type": "confirm",
-                "message": f"确认永久删除脚本文件 {script_path.name}？",
+                "message": f"确认删除脚本文件 {script_path.name}？",
                 "name": "ok",
                 "default": False,
             }])
@@ -817,22 +881,18 @@ def edit_script_item(mgr: MetadataManager, script_path: Path):
 def preview_script_output(script_path: Path):
     print("\n" + "=" * 50)
     print(f"运行脚本测试: {script_path.name}")
-    try:
-        if os.name != "nt" and not os.access(script_path, os.X_OK):
-            os.chmod(script_path, 0o755)
-        res = subprocess.run(
-            [sys.executable, str(script_path)],
-            capture_output=True, text=True, timeout=60
-        )
-        if res.returncode != 0:
-            print(f"脚本执行失败 (退出码 {res.returncode}):\n{res.stderr}")
-        else:
-            if res.stderr:
-                print(f"Standard Error (日志输出):\n{res.stderr}")
-            data = json.loads(res.stdout)
-            print(f"Standard Output (输出 {len(data)} 个模型条目):\n" + json.dumps(data, ensure_ascii=False, indent=2))
-    except Exception as e:
-        print(f"测试执行异常: {e}")
+    
+    data, error, stderr = run_script(script_path, timeout=60)
+    
+    if error:
+        print(f"脚本执行失败: {error}")
+        if stderr:
+            print(f"详细信息:\n{stderr}")
+    else:
+        if stderr:
+            print(f"日志输出:\n{stderr}")
+        print(f"共 {len(data)} 个模型:\n" + json.dumps(data, ensure_ascii=False, indent=2))
+    
     print("=" * 50)
     try:
         input("按回车键继续...")
@@ -842,7 +902,7 @@ def preview_script_output(script_path: Path):
 def add_script(mgr: MetadataManager):
     res_name = ask([{
         "type": "input",
-        "message": "请输入新脚本名称 (如 my_provider，自动追加 .py):",
+        "message": "请输入新脚本名称:",
         "name": "name",
         "validate": lambda v: bool(v and v.strip() and re.match(r"^[A-Za-z0-9._-]+$", v.strip())),
         "invalid_message": "名称仅含字母、数字、. _ -",
@@ -878,8 +938,8 @@ def add_script(mgr: MetadataManager):
     if tpl == "blank":
         content = (
             f"#!/usr/bin/env python3\n"
-            f"{format_header(stem, '自定义元数据脚本', 50, False)}\n"
-            f"\"\"\"{stem} 元数据脚本。\"\"\"\n"
+            f"{format_header(stem, '自定义参数脚本', 50, False)}\n"
+            f"\"\"\"{stem} 参数脚本。\"\"\"\n"
             f"import json\n"
             f"import sys\n\n"
             f"DATA = {{}}\n\n"
@@ -903,7 +963,7 @@ def add_script(mgr: MetadataManager):
                 os.chmod(script_path, 0o755)
             except OSError:
                 pass
-        print(f"脚本已成功创建 (默认禁用状态): {script_path.name}")
+        print(f"脚本已成功创建，默认为禁用: {script_path.name}")
 
 def _cost_m_str(val) -> str:
     """per-token 价格 -> $/1M 输入框默认值（None 返回空串）。"""
@@ -969,11 +1029,12 @@ def _edit_single_model_metadata(model_key: str, current_meta: dict):
         max_in = meta.get("max_input_tokens") or meta.get("max_tokens")
         max_out = meta.get("max_output_tokens")
         mode = meta.get("mode") or "chat"
+        litellm_provider = meta.get("litellm_provider") or "-"
         rpm = meta.get("rpm")
         tpm = meta.get("tpm")
 
         features = []
-        for feat in ["supports_vision", "supports_function_calling", "supports_system_messages", "supports_prompt_caching", "supports_reasoning"]:
+        for feat in ["supports_vision", "supports_function_calling", "supports_tool_choice", "supports_system_messages", "supports_prompt_caching", "supports_reasoning"]:
             if meta.get(feat) is True:
                 features.append(feat.replace("supports_", ""))
         feat_str = ", ".join(features) if features else "无"
@@ -982,15 +1043,16 @@ def _edit_single_model_metadata(model_key: str, current_meta: dict):
         tier_str = ",".join(f"{t}k" for t in tiers) if tiers else "无"
 
         choices = [
-            Choice("in_cost", name=f"1. Input Cost ($/1M)      : ${_fmt_cost_m(in_cost)}"),
-            Choice("out_cost", name=f"2. Output Cost ($/1M)     : ${_fmt_cost_m(out_cost)}"),
-            Choice("cache_read", name=f"3. Cache Read Cost ($/1M) : ${_fmt_cost_m(cache_read)}"),
-            Choice("cache_creation", name=f"4. Cache Write Cost ($/1M): ${_fmt_cost_m(cache_creation)}"),
-            Choice("max_in", name=f"5. Max Input Tokens    : {max_in if max_in is not None else '-'}"),
-            Choice("max_out", name=f"6. Max Output Tokens   : {max_out if max_out is not None else '-'}"),
-            Choice("mode", name=f"7. Mode / 类型         : {mode}"),
-            Choice("features", name=f"8. 特性支持开关        : {feat_str}"),
-            Choice("advanced", name=f"9. 更多高级字段 (阶梯:{tier_str} · rpm:{rpm if rpm is not None else '-'} · tpm:{tpm if tpm is not None else '-'}) >>"),
+            Choice("litellm_provider", name=f"1. LiteLLM Provider      : {litellm_provider}"),
+            Choice("in_cost", name=f"2. Input Cost ($/1M)      : ${_fmt_cost_m(in_cost)}"),
+            Choice("out_cost", name=f"3. Output Cost ($/1M)     : ${_fmt_cost_m(out_cost)}"),
+            Choice("cache_read", name=f"4. Cache Read Cost ($/1M) : ${_fmt_cost_m(cache_read)}"),
+            Choice("cache_creation", name=f"5. Cache Write Cost ($/1M): ${_fmt_cost_m(cache_creation)}"),
+            Choice("max_in", name=f"6. Max Input Tokens    : {max_in if max_in is not None else '-'}"),
+            Choice("max_out", name=f"7. Max Output Tokens   : {max_out if max_out is not None else '-'}"),
+            Choice("mode", name=f"8. Mode                : {mode}"),
+            Choice("features", name=f"9. 特性支持开关        : {feat_str}"),
+            Choice("advanced", name=f"10. 更多高级字段 (阶梯:{tier_str} · rpm:{rpm if rpm is not None else '-'} · tpm:{tpm if tpm is not None else '-'}) >>"),
             Choice("delete", name="[从分片中移除该模型]"),
             FuzzySeparator("─" * 40),
             Choice("save", name="保存并返回 >>"),
@@ -999,7 +1061,7 @@ def _edit_single_model_metadata(model_key: str, current_meta: dict):
 
         res = ask([{
             "type": "fuzzy",
-            "message": f"配置模型 [{model_key}] 元数据:",
+            "message": f"配置模型 [{model_key}] 参数:",
             "choices": choices,
             "name": "field",
         }])
@@ -1011,7 +1073,20 @@ def _edit_single_model_metadata(model_key: str, current_meta: dict):
             return meta, False
         if f == "delete":
             return None, True
-        if f in ("in_cost", "out_cost", "cache_read", "cache_creation"):
+        if f == "litellm_provider":
+            v_res = ask([{
+                "type": "input",
+                "message": "输入 LiteLLM Provider (留空清除):",
+                "default": meta.get("litellm_provider") or "",
+                "name": "v",
+            }])
+            if v_res is None:
+                continue
+            if v_res["v"].strip():
+                meta["litellm_provider"] = v_res["v"].strip()
+            else:
+                meta.pop("litellm_provider", None)
+        elif f in ("in_cost", "out_cost", "cache_read", "cache_creation"):
             field_name = {
                 "in_cost": "input_cost_per_token",
                 "out_cost": "output_cost_per_token",
@@ -1070,14 +1145,84 @@ def _edit_single_model_metadata(model_key: str, current_meta: dict):
             if m_res:
                 meta["mode"] = m_res["v"]
         elif f == "features":
-            from .models import fuzzy_picker
-            feat_keys = ["supports_vision", "supports_function_calling", "supports_system_messages", "supports_prompt_caching", "supports_reasoning", "supports_response_schema", "supports_audio_input"]
-            choices_f = [Choice(fk, name=fk, enabled=meta.get(fk) is True) for fk in feat_keys]
-            picked = fuzzy_picker(choices_f, "勾选支持的特性 (空格):")
-            for fk in feat_keys:
-                meta[fk] = fk in picked
+            _edit_features(meta)
         elif f == "advanced":
             _edit_advanced_meta(meta)
+
+def _edit_features(meta: dict):
+    """管理特性支持开关：内置特性 + 自定义supports_字段。"""
+    from .models import fuzzy_picker, _separator, HINT_MULTI
+    
+    # 内置特性列表
+    BUILTIN_FEATURES = [
+        "supports_vision", "supports_function_calling", "supports_tool_choice",
+        "supports_system_messages", "supports_prompt_caching", "supports_reasoning",
+        "supports_response_schema", "supports_audio_input"
+    ]
+    
+    while True:
+        # 收集所有supports_字段
+        all_features = {k: v for k, v in meta.items() if k.startswith("supports_")}
+        
+        # 构建Choice列表，使用enabled参数表示选中状态
+        choices = []
+        # 内置特性
+        for fk in BUILTIN_FEATURES:
+            val = meta.get(fk) is True
+            choices.append(Choice(fk, name=fk, enabled=val))
+        
+        # 自定义特性
+        custom_features = {k: v for k, v in all_features.items() if k not in BUILTIN_FEATURES}
+        for fk, fv in sorted(custom_features.items()):
+            val = fv is True
+            choices.append(Choice(fk, name=fk, enabled=val))
+        
+        # 使用fuzzy_picker进行多选
+        picked = fuzzy_picker(choices, f"选择支持的特性 (共 {len(all_features)} 个):")
+        
+        # 更新所有supports_字段
+        for fk in list(BUILTIN_FEATURES) + list(custom_features.keys()):
+            meta[fk] = fk in picked
+        
+        # 询问是否添加自定义字段
+        add_res = ask([{
+            "type": "confirm",
+            "message": "是否添加自定义 supports_ 字段？",
+            "name": "add",
+            "default": False,
+        }])
+        
+        if not add_res or not add_res.get("add"):
+            break
+        
+        # 添加自定义supports_字段
+        name_res = ask([{
+            "type": "input",
+            "message": "输入自定义字段名称 (supports_ 前缀会自动添加):",
+            "validate": lambda v: bool(v and v.strip()),
+            "name": "name",
+        }])
+        if not name_res or not name_res["name"]:
+            continue
+        
+        field_name = name_res["name"].strip()
+        if not field_name.startswith("supports_"):
+            field_name = "supports_" + field_name
+        
+        if field_name in meta:
+            print(f"字段 '{field_name}' 已存在。")
+            continue
+        
+        # 选择值
+        val_res = ask([{
+            "type": "list",
+            "message": f"设置 {field_name} 的值:",
+            "choices": ["True", "False"],
+            "name": "v",
+        }])
+        if val_res:
+            meta[field_name] = val_res["v"] == "True"
+            print(f"已添加字段 '{field_name}' = {meta[field_name]}")
 
 def _edit_tier(meta: dict, t: int):
     """管理某一阶梯 (input tokens > t*1000) 的四个价格。"""
@@ -1128,7 +1273,7 @@ def _edit_tier(meta: dict, t: int):
 def _new_tier(meta: dict):
     t_res = ask([{
         "type": "input",
-        "message": "输入阶梯触发阈值 N (单位 k tokens, 如 200 表示输入超过 200k tokens 时启用):",
+        "message": "输入阶梯触发阈值 N (单位 k tokens):",
         "validate": _valid_positive_int,
         "invalid_message": "请输入正整数",
         "name": "t",
@@ -1157,7 +1302,9 @@ def _edit_advanced_meta(meta: dict):
             Choice("tpm", name=f"TPM - 每分钟 tokens: {meta.get('tpm') if meta.get('tpm') is not None else '-'}"),
             Choice("reasoning", name=f"Reasoning Output Cost ($/1M): ${_fmt_cost_m(meta.get('output_cost_per_reasoning_token'))}"),
             Choice("deprecation_date", name=f"Deprecation Date (YYYY-MM-DD): {meta.get('deprecation_date') or '-'}"),
-            Choice("source", name=f"Source (定价来源 URL): {src_str}"),
+            Choice("source", name=f"来源: {src_str}"),
+            FuzzySeparator("─" * 40),
+            Choice("custom_fields", name="管理自定义字段 >>"),
             FuzzySeparator("─" * 40),
             Choice(None, name="[返回]"),
         ])
@@ -1172,7 +1319,7 @@ def _edit_advanced_meta(meta: dict):
         elif f in ("rpm", "tpm"):
             v_res = ask([{
                 "type": "input",
-                "message": f"输入 {f.upper()} (正整数, 留空清除):",
+                "message": f"输入 {f.upper()} (留空清除):",
                 "default": str(meta.get(f) or ""),
                 "validate": _valid_positive_int,
                 "invalid_message": "请输入正整数或留空",
@@ -1214,7 +1361,7 @@ def _edit_advanced_meta(meta: dict):
         elif f == "source":
             v_res = ask([{
                 "type": "input",
-                "message": "输入定价来源 URL (留空清除):",
+                "message": "输入来源(留空清除):",
                 "default": meta.get("source") or "",
                 "name": "v",
             }])
@@ -1224,9 +1371,178 @@ def _edit_advanced_meta(meta: dict):
                 meta["source"] = v_res["v"].strip()
             else:
                 meta.pop("source", None)
+        elif f == "custom_fields":
+            _edit_custom_fields(meta)
+
+def _edit_custom_fields(meta: dict):
+    """管理自定义字段：添加、编辑、删除任意字段。"""
+    # 已知的内置字段列表（不应被视为自定义字段）
+    KNOWN_FIELDS = {
+        "mode", "input_cost_per_token", "output_cost_per_token",
+        "cache_read_input_token_cost", "cache_creation_input_token_cost",
+        "max_input_tokens", "max_output_tokens", "max_tokens",
+        "litellm_provider", "rpm", "tpm", "source", "deprecation_date",
+        "output_cost_per_reasoning_token",
+    }
+    
+    while True:
+        # 收集自定义字段（排除已知字段和supports_字段）
+        custom_fields = {k: v for k, v in meta.items() 
+                        if k not in KNOWN_FIELDS and not k.startswith("supports_")}
+        
+        choices = []
+        for k, v in sorted(custom_fields.items()):
+            # 截断显示长值
+            v_str = str(v)
+            if len(v_str) > 40:
+                v_str = v_str[:37] + "..."
+            choices.append(Choice(k, name=f"{k}: {v_str}"))
+        
+        choices.extend([
+            FuzzySeparator("─" * 40),
+            Choice("add", name="+ 添加新字段"),
+            FuzzySeparator("─" * 40),
+            Choice(None, name="[返回]"),
+        ])
+        
+        res = ask([{
+            "type": "fuzzy",
+            "message": f"自定义字段 (共 {len(custom_fields)} 个):",
+            "choices": choices,
+            "name": "f",
+        }])
+        
+        if not res or not res["f"]:
+            break
+        
+        f = res["f"]
+        if f == "add":
+            # 添加新字段
+            name_res = ask([{
+                "type": "input",
+                "message": "输入字段名称:",
+                "validate": lambda v: bool(v and v.strip() and re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", v.strip())),
+                "invalid_message": "字段名只能包含字母、数字和下划线，且以字母或下划线开头",
+                "name": "name",
+            }])
+            if not name_res or not name_res["name"]:
+                continue
+            
+            field_name = name_res["name"].strip()
+            if field_name in meta:
+                print(f"字段 '{field_name}' 已存在，请选择编辑。")
+                continue
+            
+            # 选择字段类型
+            type_res = ask([{
+                "type": "list",
+                "message": f"选择字段 '{field_name}' 的类型:",
+                "choices": ["字符串", "数字", "布尔值", "JSON对象"],
+                "name": "type",
+            }])
+            if not type_res:
+                continue
+            
+            field_type = type_res["type"]
+            
+            if field_type == "字符串":
+                val_res = ask([{
+                    "type": "input",
+                    "message": f"输入 {field_name} 的值:",
+                    "name": "v",
+                }])
+                if val_res and val_res["v"].strip():
+                    meta[field_name] = val_res["v"].strip()
+            
+            elif field_type == "数字":
+                val_res = ask([{
+                    "type": "input",
+                    "message": f"输入 {field_name} 的值 (数字):",
+                    "validate": lambda v: not v.strip() or _valid_nonneg_float(v),
+                    "invalid_message": "请输入数字或留空",
+                    "name": "v",
+                }])
+                if val_res and val_res["v"].strip():
+                    try:
+                        meta[field_name] = float(val_res["v"])
+                    except ValueError:
+                        meta[field_name] = val_res["v"].strip()
+            
+            elif field_type == "布尔值":
+                val_res = ask([{
+                    "type": "list",
+                    "message": f"选择 {field_name} 的值:",
+                    "choices": ["True", "False"],
+                    "name": "v",
+                }])
+                if val_res:
+                    meta[field_name] = val_res["v"] == "True"
+            
+            elif field_type == "JSON对象":
+                val_res = ask([{
+                    "type": "input",
+                    "message": f"输入 {field_name} 的 JSON 值:",
+                    "name": "v",
+                }])
+                if val_res and val_res["v"].strip():
+                    try:
+                        meta[field_name] = json.loads(val_res["v"])
+                    except json.JSONDecodeError:
+                        print("JSON 格式无效，已跳过。")
+        
+        elif f in custom_fields:
+            # 编辑或删除现有字段
+            current_val = custom_fields[f]
+            action_res = ask([{
+                "type": "list",
+                "message": f"字段 '{f}' 当前值: {current_val}",
+                "choices": ["编辑", "删除"],
+                "name": "action",
+            }])
+            if not action_res:
+                continue
+            
+            if action_res["action"] == "删除":
+                conf = ask([{
+                    "type": "confirm",
+                    "message": f"确认删除字段 '{f}'？",
+                    "name": "ok",
+                    "default": False,
+                }])
+                if conf and conf.get("ok"):
+                    meta.pop(f, None)
+                    print(f"已删除字段 '{f}'。")
+            else:
+                # 编辑
+                val_res = ask([{
+                    "type": "input",
+                    "message": f"输入 {f} 的新值 (留空删除):",
+                    "default": str(current_val) if not isinstance(current_val, (dict, list)) else json.dumps(current_val, ensure_ascii=False),
+                    "name": "v",
+                }])
+                if val_res is None:
+                    continue
+                if val_res["v"].strip():
+                    # 尝试解析为原始类型
+                    new_val = val_res["v"].strip()
+                    if new_val.lower() == "true":
+                        meta[f] = True
+                    elif new_val.lower() == "false":
+                        meta[f] = False
+                    else:
+                        try:
+                            meta[f] = float(new_val)
+                        except ValueError:
+                            try:
+                                meta[f] = json.loads(new_val)
+                            except json.JSONDecodeError:
+                                meta[f] = new_val
+                else:
+                    meta.pop(f, None)
+                    print(f"已删除字段 '{f}'。")
 
 def inspect_metadata(mgr: MetadataManager):
-    print("\n正在从配置的分片构建元数据以供预览...")
+    print("\n正在构建预览参数...")
     try:
         data, _ = mgr.build()
         current_map = mgr.client.fetch_model_cost_map()
@@ -1260,7 +1576,7 @@ def inspect_metadata(mgr: MetadataManager):
         
         res = ask([{
             "type": "fuzzy",
-            "message": f"元数据预览 (共 {len(data)} 条模型，对比当前 Proxy):",
+            "message": f"参数预览 (共 {len(data)} 条模型，对比当前 Proxy):",
             "choices": choices,
             "name": "key",
             "long_instruction": HINT_FUZZY,
@@ -1271,7 +1587,7 @@ def inspect_metadata(mgr: MetadataManager):
         k = res["key"]
         n_entry = data[k]
         c_entry = current_map.get(k, {})
-        print(f"\n======== 模型元数据详情: {k} ========")
+        print(f"\n======== 模型参数详情: {k} ========")
         print(f"新生成条目:\n{json.dumps(n_entry, ensure_ascii=False, indent=2)}")
         if c_entry:
             print(f"Proxy 当前实时条目:\n{json.dumps(c_entry, ensure_ascii=False, indent=2)}")
