@@ -23,7 +23,7 @@ import urllib.request
 
 API_URL = "https://openrouter.ai/api/v1/models"
 PROVIDER = "openrouter"
-TIMEOUT = 30
+TIMEOUT = 300
 
 
 def _float_or_none(value):
@@ -102,7 +102,7 @@ def main():
             "response_format" in params or "structured_outputs" in params
         )
 
-        fragment[mid] = entry
+        fragment[f"{PROVIDER}/{mid}"] = entry
 
     print(
         f"OpenRouter: 共 {len(models)} 个模型，生成 {len(fragment)} 个 chat 模型条目，"
