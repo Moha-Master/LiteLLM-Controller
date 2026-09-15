@@ -1,0 +1,124 @@
+/* app.tcss — LiteLLM Controller TUI 样式 */
+
+Screen {
+    background: $surface;
+}
+
+/* ---------- 模态公共 ---------- */
+.modal-box {
+    border: round $primary;
+    background: $surface;
+    padding: 1 2;
+}
+
+.modal-title {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.btn-row {
+    height: auto;
+    align-horizontal: right;
+    margin-top: 1;
+}
+
+.btn-row Button {
+    margin-left: 2;
+}
+
+.frm-browse-row {
+    height: auto;
+    width: 1fr;
+}
+
+.frm-browse-input {
+    width: 1fr;
+}
+
+/* ---------- 通用页头 ---------- */
+.page-title {
+    height: auto;
+    padding: 0 1;
+    text-style: bold;
+}
+
+.page-hint {
+    height: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+.toolbar {
+    height: auto;
+    padding: 0 1;
+    margin-top: 1;
+}
+
+.toolbar Button,
+.toolbar Select {
+    margin-right: 2;
+}
+
+/* ---------- 列表类页面 ---------- */
+.search-row {
+    height: auto;
+    padding: 0 1;
+}
+
+.search-row Input {
+    width: 1fr;
+}
+
+.tbl {
+    height: 1fr;
+    margin: 1 1 0 1;
+    border: round $secondary;
+}
+
+.tbl:focus {
+    border: tall $primary;
+}
+
+OptionList {
+    border: round $secondary;
+}
+
+/* ---------- 首页菜单 ---------- */
+#home-list {
+    width: 60;
+    height: auto;
+    margin: 2 0 0 0;
+}
+
+#home-title {
+    width: 60;
+    height: auto;
+    margin-top: 2;
+    text-align: center;
+}
+
+HomeScreen {
+    align-horizontal: center;
+}
+
+/* ---------- 底部状态栏 ---------- */
+#status {
+    height: 1;
+    dock: bottom;
+    padding: 0 1;
+    background: $panel;
+    color: $text;
+}
+
+#status.ok { color: $success; }
+#status.warn { color: $warning; }
+#status.err { color: $error; }
+
+Footer {
+    background: $panel;
+}
+
+Header {
+    background: $panel;
+    color: $text;
+}

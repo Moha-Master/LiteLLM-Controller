@@ -40,7 +40,8 @@ def upstream_label(upstream: dict) -> str:
     return spec.get("label", upstream.get("type", "?"))
 
 
-def fetch_upstream_models(upstream: dict, timeout: int = 30) -> list:
+def fetch_upstream_models(upstream: dict, timeout: int = 30, log=None) -> list:
+    """拉取上游模型列表。log 为可选的告警回调（UI 层用于展示，不 print）。"""
     spec = UPSTREAM_TYPES.get(upstream.get("type"))
     if spec is None:
         raise UpstreamError(f"不支持的 Upstream 类型: {upstream.get('type')}")
@@ -50,10 +51,11 @@ def fetch_upstream_models(upstream: dict, timeout: int = 30) -> list:
             f"Upstream [{upstream['name']}] endpoint 未填写（应为完整的模型列表 API URL，如 {spec['example_url']}）"
         )
     if not urlparse(url).path.strip("/"):
-        print(
-            f"警告: Upstream [{upstream['name']}] endpoint 看起来缺少路径，"
-            f"应填写完整的模型列表 API URL，如 {spec['example_url']}"
-        )
+        if log:
+            log(
+                f"警告: Upstream [{upstream['name']}] endpoint 看起来缺少路径，"
+                f"应填写完整的模型列表 API URL，如 {spec['example_url']}"
+            )
     key = upstream["key"]
     headers = {}
     params = {}
@@ -90,6 +92,6 @@ def fetch_upstream_models(upstream: dict, timeout: int = 30) -> list:
     else:
         models = [m["id"] for m in payload.get("data", []) if isinstance(m, dict) and m.get("id")]
         truncated = bool(payload.get("has_more"))
-    if truncated:
-        print(f"警告: Upstream [{upstream['name']}] 模型数量超过 {MAX_PAGE_SIZE} 个，列表可能被截断。")
+    if truncated and log:
+        log(f"警告: Upstream [{upstream['name']}] 模型数量超过 {MAX_PAGE_SIZE} 个，列表可能被截断。")
     return models
