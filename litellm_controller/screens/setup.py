@@ -6,7 +6,7 @@ import asyncio
 
 from rich.text import Text
 from textual import work
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
@@ -17,7 +17,7 @@ from ..config import (
     save_config,
 )
 from ..upstreams import UPSTREAM_TYPES
-from ..widgets import ConfirmModal, FormField, FormModal, PickItem
+from ..widgets import ConfirmModal, FormField, FormModal, HintBar, PickItem
 
 
 def mask_key(key: str) -> str:
@@ -92,6 +92,7 @@ class UpstreamFormModal(FormModal):
         super().__init__(
             "编辑 Upstream" if existing else "添加 Upstream",
             fields,
+            extra_buttons=[("frm-delete", "删除", "error")] if existing else None,
         )
 
     def _provider_items(self, name_value: str) -> list:
@@ -154,10 +155,10 @@ class SummaryModal(ModalScreen[str]):
             yield Static(Text("最终配置概览", style="bold"), classes="modal-title")
             with VerticalScroll(classes="sum-body"):
                 yield Static(lines)
-            with Vertical(classes="btn-row"):
-                yield Button("保存并进入", id="save", variant="primary")
-                yield Button("继续添加 Upstream", id="add", variant="default")
+            with Horizontal(classes="btn-row"):
                 yield Button("取消配置", id="cancel", variant="default")
+                yield Button("继续添加 Upstream", id="add", variant="default")
+                yield Button("保存并进入", id="save", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id)
@@ -187,7 +188,7 @@ class SetupWizardScreen(ModalScreen[bool]):
         with Vertical(classes="modal-box sw-intro"):
             yield Static(Text(title, style="bold"), classes="modal-title")
             yield Static(body, id="sw-msg")
-            yield Static("Esc 取消向导并退出程序", classes="page-hint")
+            yield HintBar("Esc/Ctrl+C 取消向导并退出程序", classes="page-hint")
 
     def on_mount(self) -> None:
         self._flow()

@@ -1,15 +1,19 @@
-"""共享 UI 组件：模糊筛选单/多选、确认、输入、表单、输出查看与表格辅助。
+"""共享 UI 组件：确认、输入、选择列表、多字段表单、输出查看、表格与模糊筛选辅助。
 
-所有模态均以 ModalScreen 泛型返回值 + push_screen_wait 消费；
-数据展示统一走 DataTable/SelectionList，不再使用字符串伪表格。
+所有模态均为 ModalScreen 泛型返回值，配合 push_screen_wait / 回调消费；
+数据展示统一使用 DataTable（ClickTable 单击执行），不构造字符串伪表格。
+模态三段式（.modal-title / 内容 / .btn-row）样式定义在 app.tcss。
 """
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
+from rich.cells import cell_len
 from rich.text import Text
-from textual import on
+from textual import events, on
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -20,13 +24,14 @@ from textual.widgets import (
     Select,
     SelectionList,
     Static,
+    Switch,
+    TextArea,
 )
 
-try:  # textual 各版本导出位置不同
-    from textual.widgets import Option
+try:  # 不同 textual 版本 Option 导出位置不同
+    from textual.widgets.option_list import Option
 except ImportError:  # pragma: no cover
     from textual.widgets._option_list import Option
-
 
 # ---------------------------------------------------------------- 文案与配色
 
@@ -37,7 +42,7 @@ STYLE_INFO = "#61afef"
 STYLE_DIM = "dim"
 
 
-def tint(value, style: str) -> Text:
+def tint(value: Any, style: str) -> Text:
     t = Text(str(value))
     t.stylize(style)
     return t
@@ -50,13 +55,21 @@ def colored_text(value: str, *, err: bool = False, warn: bool = False, dim: bool
     elif warn:
         t.stylize(STYLE_WARN)
     elif dim:
-        t.stylize("dim")
+        t.stylize(STYLE_DIM)
     return t
 
 
 HINT_PICK = "输入筛选 · ↑↓ 移动 · 回车 确认 · Esc 取消"
-HINT_MULTI = "输入筛选 · 空格 勾选 · ↑↓ 移动 · 确认 提交 · Esc 取消"
-HINT_MENU = "↑↓ 移动 · 回车 确认 · Esc 返回"
+HINT_MENU = "↑↓ 移动 · 回车 确认 · Ctrl+Q 退出"
+# 文本编辑模式（焦点在 Input / TextArea）：GUI 风编辑键位，输入框聚焦时替换页面 HINT
+HINT_FORM = "Tab 轮切字段 · Enter 提交 · Esc/Ctrl+C 取消"
+EDIT_HINT = "Home/End 行首/行尾 · Ctrl+Shift+A 全选 · Ctrl+X/C/V 剪切/复制/粘贴 · Esc/Ctrl+C 返回"
+HINT_FORM_EDIT = "Home/End 行首/行尾 · Ctrl+Shift+A 全选 · Ctrl+X/C/V 剪切/复制/粘贴 · Enter 提交 · Esc/Ctrl+C 取消"
+HINT_FORM_TA = "Home/End 行首/行尾 · Ctrl+Shift+A 全选 · Ctrl+X/C/V 剪切/复制/粘贴 · Ctrl+Z/Y 撤销/重做 · Esc/Ctrl+C 取消"
+
+
+def _truthy(value: Any) -> bool:
+    return str(value).lower() in ("1", "true", "yes", "on")
 
 
 # ---------------------------------------------------------------- 模糊匹配
@@ -110,22 +123,18 @@ class PickItem:
         return self.label
 
 
-def as_pick_items(values: Iterable, *, label: Callable[[Any], str] = str, **kw) -> list:
-    return [PickItem(v, label(v), **kw) for v in values]
-
-
 # ---------------------------------------------------------------- 确认弹窗
 
 class ConfirmModal(ModalScreen[bool]):
-    """通用确认框：回车=确认，Esc/取消=否。"""
+    """通用确认框：三段式（标题栏 / 内容 / 按钮栏）。回车 = 确认，Esc / 取消 = 否。"""
 
     DEFAULT_CSS = """
     ConfirmModal { align: center middle; }
-    ConfirmModal > .modal-box { width: 76; height: auto; max-height: 90%; }
-    ConfirmModal .cf-msg { height: auto; margin-bottom: 1; }
+    ConfirmModal > .modal-box { width: 76; }
+    ConfirmModal .cf-msg { height: auto; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(self, message, title="请确认", *, yes="确认", no="取消", default_yes=True):
         super().__init__()
@@ -138,11 +147,11 @@ class ConfirmModal(ModalScreen[bool]):
     def compose(self):
         with Vertical(classes="modal-box"):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
-            yield Static(self.message, classes="cf-msg")
+            with Vertical(classes="modal-main"):
+                yield Static(self.message, classes="cf-msg")
             with Horizontal(classes="btn-row"):
-                yes_variant = "primary" if self.default_yes else "error"
-                yield Button(self.yes_label, id="yes", variant=yes_variant)
                 yield Button(self.no_label, id="no", variant="default")
+                yield Button(self.yes_label, id="yes", variant="primary" if self.default_yes else "error")
 
     def on_key(self, event) -> None:
         if event.key == "enter":
@@ -160,17 +169,18 @@ class ConfirmModal(ModalScreen[bool]):
 # ---------------------------------------------------------------- 输入弹窗
 
 class InputModal(ModalScreen[str | None]):
-    """单行输入（validator 返回 False 时提示错误并停留）。留空=保持原值。None=取消。"""
+    """单行输入，三段式。validator 返回 False 时提示错误并停留。None=取消。"""
 
     DEFAULT_CSS = """
     InputModal { align: center middle; }
-    InputModal > .modal-box { width: 80; height: auto; }
+    InputModal > .modal-box { width: 80; }
     InputModal .im-error { color: $error; height: auto; }
     InputModal .im-hint { color: $text-muted; height: auto; }
-    InputModal Input { margin-bottom: 1; }
+    InputModal .im-msg { height: auto; margin-bottom: 1; }
+    InputModal .im-input { margin-bottom: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(
         self,
@@ -178,7 +188,6 @@ class InputModal(ModalScreen[str | None]):
         *,
         title="输入",
         value: str = "",
-        password: bool = False,
         validator: Callable[[str], bool] | None = None,
         error: str = "输入不合法",
         hint: str = "",
@@ -187,7 +196,6 @@ class InputModal(ModalScreen[str | None]):
         self.message = message if isinstance(message, Text) else Text(str(message))
         self.title_text = title
         self.initial = value
-        self.password = password
         self.validator = validator
         self.error_text = error
         self.hint_text = hint
@@ -195,25 +203,35 @@ class InputModal(ModalScreen[str | None]):
     def compose(self):
         with Vertical(classes="modal-box"):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
-            yield Static(self.message, classes="im-msg")
-            yield Input(
-                value=self.initial if not self.password else "",
-                password=self.password,
-                placeholder=self.initial if self.password else "",
-                id="im-input",
-            )
-            if self.hint_text:
-                yield Static(self.hint_text, classes="im-hint")
-            yield Static("", classes="im-error", id="im-error")
+            with Vertical(classes="modal-main"):
+                yield Static(self.message, classes="im-msg")
+                yield Input(value=self.initial, id="im-input", classes="im-input", compact=True)
+                if self.hint_text:
+                    yield Static(self.hint_text, classes="im-hint")
+                yield Static("", classes="im-error", id="im-error")
+                yield HintBar("", classes="page-hint", id="im-hint")
+            with Horizontal(classes="btn-row"):
+                yield Button("取消", id="im-cancel", variant="default")
+                yield Button("确定", id="im-ok", variant="primary")
 
     def on_mount(self) -> None:
         self.query_one("#im-input", Input).focus()
+        self._refresh_hint()
+
+    def on_descendant_focus(self, event) -> None:
+        self._refresh_hint()
+
+    def on_descendant_blur(self, event) -> None:
+        self._refresh_hint()
+
+    def _refresh_hint(self) -> None:
+        if not self.is_mounted:
+            return
+        editing = isinstance(self.app.focused, (Input, TextArea))
+        self.query_one("#im-hint", HintBar).update(HINT_FORM_EDIT if editing else HINT_FORM)
 
     def _submit(self) -> None:
-        inp = self.query_one("#im-input", Input)
-        val = inp.value if self.password else inp.value.strip()
-        if not val and self.password and self.initial:
-            val = self.initial  # 密码留空表示保持原值
+        val = self.query_one("#im-input", Input).value.strip()
         if self.validator and not self.validator(val):
             self.query_one("#im-error", Static).update(Text(self.error_text, style=STYLE_ERR))
             return
@@ -222,23 +240,31 @@ class InputModal(ModalScreen[str | None]):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._submit()
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "im-ok":
+            self._submit()
+        else:
+            self.dismiss(None)
+
     def action_cancel(self) -> None:
         self.dismiss(None)
 
 
 # ---------------------------------------------------------------- 单选弹窗（模糊筛选）
 
-class PickModal(ModalScreen[PickItem | None]):
-    """模糊筛选单选列表，尾部可带操作项（手动输入/返回等）。"""
+class PickModal(ModalScreen["PickItem | None"]):
+    """模糊筛选单选列表（项目选择菜单复用件），尾部可带操作项。"""
 
     DEFAULT_CSS = """
     PickModal { align: center middle; }
-    PickModal > .modal-box { width: 92; height: 80%; }
+    PickModal > .modal-box { width: 92; height: 80%; padding: 0; }
+    PickModal .pk-main { height: 1fr; padding: 1 2; }
     PickModal .pk-hint { color: $text-muted; height: 1; }
-    PickModal OptionList { height: 1fr; border: round $secondary; }
+    PickModal .pk-msg { height: auto; margin-bottom: 1; }
+    PickModal OptionList { height: 1fr; border: round $secondary; margin-top: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(self, title: str, items: list, *, footer_items: list | None = None, message: str = ""):
         super().__init__()
@@ -251,11 +277,12 @@ class PickModal(ModalScreen[PickItem | None]):
     def compose(self):
         with Vertical(classes="modal-box"):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
-            if self.message:
-                yield Static(self.message, classes="pk-msg")
-            yield Input(placeholder="输入以筛选…", id="pk-search")
-            yield OptionList(id="pk-list", markup=False)
-            yield Static(HINT_PICK, classes="pk-hint")
+            with Vertical(classes="pk-main"):
+                if self.message:
+                    yield Static(self.message, classes="pk-msg")
+                yield Input(placeholder="输入以筛选…", compact=True, id="pk-search")
+                yield OptionList(id="pk-list", markup=False)
+                yield Static(HINT_PICK, classes="pk-hint")
 
     def on_mount(self) -> None:
         self._rebuild("")
@@ -278,6 +305,15 @@ class PickModal(ModalScreen[PickItem | None]):
     def _on_search(self, event: Input.Changed) -> None:
         self._rebuild(event.value.strip())
 
+    @on(Input.Submitted, "#pk-search")
+    def _on_submit(self, event: Input.Submitted) -> None:
+        ol = self.query_one("#pk-list", OptionList)
+        idx = ol.highlighted if ol.highlighted is not None else 0
+        if 0 <= idx < len(self._visible):
+            item = self._visible[idx]
+            if not item.disabled:
+                self.dismiss(item)
+
     @on(OptionList.OptionSelected)
     def _on_pick(self, event: OptionList.OptionSelected) -> None:
         idx = event.option_index
@@ -292,17 +328,19 @@ class PickModal(ModalScreen[PickItem | None]):
 
 # ---------------------------------------------------------------- 多选弹窗
 
-class MultiPickModal(ModalScreen[list | None]):
-    """模糊筛选多选（value 必须为 str）。返回选中的 value 列表；None=取消。"""
+class MultiPickModal(ModalScreen["list | None"]):
+    """模糊筛选多选（value 必须为 str），返回选中的 value 列表；None=取消。"""
 
     DEFAULT_CSS = """
     MultiPickModal { align: center middle; }
-    MultiPickModal > .modal-box { width: 92; height: 85%; }
+    MultiPickModal > .modal-box { width: 92; height: 85%; padding: 0; }
+    MultiPickModal .mp-main { height: 1fr; padding: 1 2; }
     MultiPickModal .mp-hint { color: $text-muted; height: 1; }
-    MultiPickModal SelectionList { height: 1fr; border: round $secondary; }
+    MultiPickModal .mp-msg { height: auto; margin-bottom: 1; }
+    MultiPickModal SelectionList { height: 1fr; border: round $secondary; margin-top: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
     def __init__(self, title: str, items: list, *, message: str = ""):
         super().__init__()
@@ -316,14 +354,15 @@ class MultiPickModal(ModalScreen[list | None]):
     def compose(self):
         with Vertical(classes="modal-box"):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
-            if self.message:
-                yield Static(self.message, classes="mp-msg")
-            yield Input(placeholder="输入以筛选…", id="mp-search")
-            yield SelectionList(id="mp-list")
+            with Vertical(classes="mp-main"):
+                if self.message:
+                    yield Static(self.message, classes="mp-msg")
+                yield Input(placeholder="输入以筛选…", compact=True, id="mp-search")
+                yield SelectionList(id="mp-list")
+                yield Static("输入筛选 · 空格 勾选 · ↑↓ 移动 · Esc/Ctrl+C 取消", classes="mp-hint")
             with Horizontal(classes="btn-row"):
-                yield Button("确认", id="mp-ok", variant="primary")
                 yield Button("取消", id="mp-cancel", variant="default")
-            yield Static(HINT_MULTI, classes="mp-hint")
+                yield Button("确认", id="mp-ok", variant="primary")
 
     def on_mount(self) -> None:
         self._rebuild("")
@@ -379,48 +418,58 @@ class MultiPickModal(ModalScreen[list | None]):
 class FormField:
     name: str
     label: str
-    kind: str = "text"  # text | password | choice | browse | note
-    value: str = ""
-    options: list = field(default_factory=list)      # choice: list[(label, value)]
-    pick_items: list = field(default_factory=list)   # browse: list[PickItem]
+    kind: str = "text"  # text | password | choice | switch | browse | textarea | note
+    value: str = ""  # switch: "on" 表示开启
+    options: list = field(default_factory=list)  # choice: list[(label, value)]
+    pick_items: Any = None  # browse: list[PickItem] 或返回 list 的可调用对象
     pick_title: str = "选择"
     validator: Callable[[str], bool] | None = None
     error: str = "输入不合法"
     placeholder: str = ""
     hint: str = ""
-    allow_blank: bool = False                         # text 留空是否合法
 
 
-class FormModal(ModalScreen[dict | None]):
-    """多字段表单，返回 {name: value}；None=取消。password 留空保持原值。"""
+class FormModal(ModalScreen["dict | None"]):
+    """多字段表单，三段式，返回 {name: value}；None=取消。password 留空保持原值。"""
 
     DEFAULT_CSS = """
     FormModal { align: center middle; }
-    FormModal > .modal-box { width: 96; max-height: 92%; }
+    FormModal > .modal-box { width: 92; min-height: 24; max-height: 92%; padding: 0; }
     FormModal .frm-note { color: $text-muted; height: auto; }
     FormModal .frm-row { height: auto; margin-bottom: 1; }
-    FormModal .frm-label { width: 24; padding: 1 1 0 0; text-align: right; text-style: bold; }
-    FormModal .frm-field { width: 1fr; }
-    FormModal .frm-field Input, FormModal .frm-field Select { width: 1fr; }
+    FormModal .frm-label { width: 16; height: 1; content-align: right middle; text-style: bold; margin-right: 1; }
+    FormModal .frm-field { width: 1fr; height: auto; }
+    FormModal .frm-field Input, FormModal .frm-field Select { width: 1fr; margin-top: 0; }
+    FormModal .frm-field TextArea { width: 1fr; height: 7; }
+    FormModal .frm-field .frm-note { margin-top: 0; }
+    FormModal .frm-field Switch { height: 1; border: none; padding: 0 1; }
+    FormModal .frm-field Switch:focus { border: none; background-tint: $foreground 8%; }
     FormModal .frm-err { color: $error; height: 1; }
-    FormModal .frm-body { height: 1fr; }
+    FormModal .frm-body { height: 1fr; padding: 1 2; }
+    FormModal .frm-pad { height: 1; }
+    FormModal .frm-browse-row { height: 1; width: 1fr; layout: horizontal; }
+    FormModal .frm-browse-input { width: 1fr; }
+    FormModal .frm-browse { margin-left: 1; }
     """
 
-    BINDINGS = [Binding("escape", "cancel", show=False)]
+    BINDINGS = [Binding("escape,ctrl+c", "cancel", show=False)]
 
-    def __init__(self, title: str, fields: list, *, message: str = "", ok_label="保存"):
+    def __init__(self, title: str, fields: list, *, message: str = "", ok_label="保存", extra_buttons=None):
         super().__init__()
         self.title_text = title
         self.fields = list(fields)
         self.message = message
         self.ok_label = ok_label
+        # 额外按钮：list[(id, label, variant)]，点击后以按钮 id 作为结果 dismiss
+        self.extra_buttons = list(extra_buttons or [])
 
     def compose(self):
         with Vertical(classes="modal-box"):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
-            if self.message:
-                yield Static(self.message, classes="frm-note")
             with VerticalScroll(classes="frm-body"):
+                if self.message:
+                    yield Static(self.message, classes="frm-note")
+                    yield Static("", classes="frm-pad")
                 for f in self.fields:
                     if f.kind == "note":
                         yield Static(f.label, classes="frm-note")
@@ -432,31 +481,68 @@ class FormModal(ModalScreen[dict | None]):
                                 yield Input(
                                     value=f.value if f.kind == "text" else "",
                                     password=(f.kind == "password"),
-                                    placeholder=(f.value if f.kind == "password" else f.placeholder),
+                                    placeholder=(mask_secret(f.value) if f.kind == "password" else f.placeholder),
+                                    compact=True,
                                     id=f"in-{f.name}",
                                 )
                             elif f.kind == "browse":
                                 with Horizontal(classes="frm-browse-row"):
-                                    yield Input(value=f.value, id=f"in-{f.name}", classes="frm-browse-input")
-                                    yield Button("选择…", id=f"br-{f.name}", classes="frm-browse", variant="default")
+                                    yield Input(
+                                        value=f.value,
+                                        compact=True,
+                                        classes="frm-browse-input",
+                                        id=f"in-{f.name}",
+                                    )
+                                    yield Button(
+                                        "选择…", id=f"br-{f.name}", classes="frm-browse", variant="default"
+                                    )
                             elif f.kind == "choice":
                                 yield Select(
                                     [(lab, val) for lab, val in f.options],
                                     value=f.value if f.value else Select.NULL,
                                     allow_blank=not f.value,
+                                    compact=True,
                                     id=f"se-{f.name}",
                                 )
+                            elif f.kind == "switch":
+                                yield Switch(value=_truthy(f.value), id=f"sw-{f.name}")
+                            elif f.kind == "textarea":
+                                yield TextArea(f.value, id=f"ta-{f.name}")
                             if f.hint:
                                 yield Static(f.hint, classes="frm-note")
             yield Static("", classes="frm-err", id="frm-error")
+            yield HintBar("", classes="page-hint", id="frm-hint")
             with Horizontal(classes="btn-row"):
-                yield Button(self.ok_label, id="frm-ok", variant="primary")
                 yield Button("取消", id="frm-cancel", variant="default")
+                yield Button(self.ok_label, id="frm-ok", variant="primary")
+                for bid, label, variant in self.extra_buttons:
+                    yield Button(label, id=bid, variant=variant)
 
     def on_mount(self) -> None:
-        first_input = self.query(Input)
-        if first_input:
-            first_input.first().focus()
+        for widget_type in (Input, Select, Switch, TextArea):
+            found = self.query(widget_type)
+            if found:
+                found.first().focus()
+                break
+        self._refresh_hint()
+
+    def on_descendant_focus(self, event) -> None:
+        self._refresh_hint()
+
+    def on_descendant_blur(self, event) -> None:
+        self._refresh_hint()
+
+    def _refresh_hint(self) -> None:
+        if not self.is_mounted:
+            return
+        focused = self.app.focused
+        if isinstance(focused, TextArea):
+            text = HINT_FORM_TA
+        elif isinstance(focused, Input):
+            text = HINT_FORM_EDIT
+        else:
+            text = HINT_FORM
+        self.query_one("#frm-hint", HintBar).update(text)
 
     @on(Button.Pressed, ".frm-browse")
     def _on_browse(self, event: Button.Pressed) -> None:
@@ -474,7 +560,8 @@ class FormModal(ModalScreen[dict | None]):
         if item is not None:
             self.query_one(f"#in-{name}", Input).value = str(item.value)
 
-    def _collect(self) -> dict | None:
+    def _collect(self) -> "dict | None":
+        """收集表单值；校验失败时写入错误信息并返回 None。可在子类扩展。"""
         err_box = self.query_one("#frm-error", Static)
         err_box.update(Text(""))
         out = {}
@@ -484,6 +571,10 @@ class FormModal(ModalScreen[dict | None]):
             if f.kind == "choice":
                 val = self.query_one(f"#se-{f.name}", Select).value
                 val = "" if val is Select.NULL else str(val)
+            elif f.kind == "switch":
+                val = bool(self.query_one(f"#sw-{f.name}", Switch).value)
+            elif f.kind == "textarea":
+                val = self.query_one(f"#ta-{f.name}", TextArea).text.strip()
             else:
                 val = self.query_one(f"#in-{f.name}", Input).value
                 if f.kind == "password":
@@ -497,13 +588,28 @@ class FormModal(ModalScreen[dict | None]):
             out[f.name] = val
         return out
 
+    def show_error(self, message: str) -> None:
+        self.query_one("#frm-error", Static).update(Text(message, style=STYLE_ERR))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        data = self._collect()
+        if data is not None:
+            self.dismiss(data)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "frm-ok":
+        bid = event.button.id
+        if bid == "frm-ok":
             data = self._collect()
             if data is not None:
                 self.dismiss(data)
-        else:
+        elif bid == "frm-cancel":
             self.dismiss(None)
+        elif event.button.has_class("frm-browse"):
+            # 选择按钮由 _on_browse 处理（弹出 PickModal），不得走额外按钮分支
+            event.stop()
+        else:
+            # 额外按钮：以按钮 id 作为结果返回，由调用方解释
+            self.dismiss(bid)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -512,17 +618,16 @@ class FormModal(ModalScreen[dict | None]):
 # ---------------------------------------------------------------- 输出查看弹窗
 
 class OutputModal(ModalScreen[None]):
-    """滚动文本查看弹窗（脚本预览/JSON 详情等），Esc/回车关闭。"""
+    """滚动文本查看弹窗（长文本/详情预览等），三段式，Esc / 回车 / 关闭按钮退出。"""
 
     DEFAULT_CSS = """
     OutputModal { align: center middle; }
-    OutputModal > .modal-box { width: 100; height: 92%; }
-    OutputModal .out-body { height: 1fr; border: round $secondary; }
-    OutputModal .out-hint { color: $text-muted; height: 1; }
+    OutputModal > .modal-box { width: 100; height: 90%; padding: 0; }
+    OutputModal .out-body { height: 1fr; border: none; padding: 1 2; }
     """
 
     BINDINGS = [
-        Binding("escape", "close", show=False),
+        Binding("escape,ctrl+c", "close", show=False),
         Binding("enter", "close", show=False),
     ]
 
@@ -536,7 +641,11 @@ class OutputModal(ModalScreen[None]):
             yield Static(Text(self.title_text, style="bold"), classes="modal-title")
             with VerticalScroll(classes="out-body"):
                 yield Static(self.content)
-            yield Static("Esc / 回车 关闭 · 滚动浏览", classes="out-hint")
+            with Horizontal(classes="btn-row"):
+                yield Button("关闭", id="out-close", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -544,24 +653,281 @@ class OutputModal(ModalScreen[None]):
 
 # ---------------------------------------------------------------- 表格辅助
 
-def make_table(*headers, cursor: str = "row", zebra: bool = True) -> DataTable:
-    dt = DataTable(cursor_type=cursor, zebra_stripes=zebra)
+class HintBar(ScrollableContainer):
+    """单行操作提示栏：内容宽于容器时，像 LED 屏一样来回滚动（端点停留约 3s）。"""
+
+    DEFAULT_CSS = """
+    HintBar {
+        height: 1;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-size: 0 0;
+    }
+    HintBar .hint-text {
+        width: auto;
+        height: 1;
+    }
+    """
+
+    TICK = 0.25
+    HOLD = 12  # 到达端点后停留的拍数（12 x 0.25s = 3s）
+
+    def __init__(self, text: str = "", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._text = text
+        self._direction = 1
+        self._hold = 0
+
+    def compose(self):
+        yield Static(Text(self._text, no_wrap=True), classes="hint-text")
+
+    def on_mount(self) -> None:
+        self.set_interval(self.TICK, self._tick)
+
+    def update(self, text: str) -> None:
+        self._text = text
+        self._direction = 1
+        self._hold = 0
+        if self.is_mounted:
+            self.query_one(".hint-text", Static).update(Text(text, no_wrap=True))
+            self.scroll_x = 0
+
+    def _tick(self) -> None:
+        total = self.virtual_size.width
+        view = self.size.width
+        if total <= view:
+            if self.scroll_x:
+                self.scroll_x = 0
+            return
+        if self._hold > 0:
+            self._hold -= 1
+            return
+        end = total - view
+        x = int(self.scroll_x) + self._direction
+        if x >= end:
+            x = end
+            self._direction = -1
+            self._hold = self.HOLD
+        elif x <= 0:
+            x = 0
+            self._direction = 1
+            self._hold = self.HOLD
+        self.scroll_x = x
+
+
+def marquee_window(text: str, width: int, offset: int) -> str:
+    """在 width 单元格内取 text 的循环窗口，起点为第 offset 个字符（跑马灯用）。"""
+    if width <= 0 or not text:
+        return " " * max(0, width)
+    s = text + "   "
+    n = len(s)
+    used = 0
+    out: list[str] = []
+    i = offset % n
+    while used < width and len(out) <= n + width:
+        ch = s[i % n]
+        w = cell_len(ch) or 1
+        if used + w > width:
+            break
+        out.append(ch)
+        used += w
+        i += 1
+    return "".join(out) + " " * (width - used)
+
+
+class MenuMarquee:
+    """首页 OptionList 菜单行控制器：描述右对齐，超宽时来回跑马灯。
+
+    屏幕 on_mount 用法::
+
+        self._marquee = MenuMarquee(self, "home-list", [(label, desc), ...])
+        ol.add_options([Option("") for _ in self._marquee.rows])
+        self.call_after_refresh(self._marquee.start)
+    """
+
+    TICK = 0.25
+    HOLD = 12
+
+    def __init__(self, screen, list_id: str, rows, *, label_width: int = 14) -> None:
+        self.screen = screen
+        self.list = screen.query_one(f"#{list_id}", OptionList)
+        self.rows = list(rows)
+        self.label_width = label_width
+        self.offset = 0
+        self.direction = 1
+        self.hold = 0
+        self._timer = None
+
+    def placeholder_options(self):
+        """与 rows 等长的占位 Option（先 add_options，再由 sync 填充文本）。"""
+        return [Option("") for _ in self.rows]
+
+    def start(self) -> None:
+        self.sync()
+        if self._timer is None:
+            self._timer = self.screen.set_interval(self.TICK, self._tick)
+
+    def set_rows(self, rows) -> None:
+        self.rows = list(rows)
+        self.offset = 0
+        self.direction = 1
+        self.hold = 0
+        self.sync()
+
+    def sync(self) -> None:
+        node = self.list
+        if not node.is_mounted or node.option_count != len(self.rows):
+            return
+        for idx in range(len(self.rows)):
+            node.replace_option_prompt_at_index(idx, self._prompt(idx))
+
+    def _room(self) -> int:
+        node = self.list
+        width = node.content_size.width
+        if node.show_vertical_scrollbar:
+            width -= node.scrollbar_size_vertical
+        return max(6, width - self.label_width - 4)
+
+    def _prompt(self, idx: int) -> Text:
+        label, desc = self.rows[idx]
+        label = shorten(label, self.label_width)
+        pad = " " * max(0, self.label_width - cell_len(label))
+        prefix = f" {idx + 1:<2} {label}{pad}"
+        room = self._room()
+        if cell_len(desc) <= room:
+            window = " " * (room - cell_len(desc)) + desc
+        else:
+            window = marquee_window(desc, room, self.offset)
+        text = Text(no_wrap=True, overflow="crop")
+        text.append(prefix, style="bold")
+        text.append(window, style="dim")
+        return text
+
+    def _tick(self) -> None:
+        room = self._room()
+        longest = max((cell_len(d) for _, d in self.rows), default=0)
+        if longest <= room:
+            if self.offset:
+                self.offset = 0
+                self.sync()
+            return
+        if self.hold > 0:
+            self.hold -= 1
+            return
+        span = max(cell_len(d) + 3 for _, d in self.rows if cell_len(d) > room)
+        self.offset += self.direction
+        if self.offset >= span:
+            self.offset = span - 1
+            self.direction = -1
+            self.hold = self.HOLD
+        elif self.offset <= 0:
+            self.offset = 0
+            self.direction = 1
+            self.hold = self.HOLD
+        self.sync()
+
+
+class ClickTable(DataTable):
+    """列表即操作的表格：单击数据单元格 = 移动光标并立即发 RowSelected。
+
+    注意：Textual 沿 MRO 逐类派发事件，重写 `_on_click` 后父类实现仍会被调用一次，
+    因此接管分支与回落分支都必须 prevent_default()，防止 RowSelected 双发。
+    """
+
+    async def _on_click(self, event: events.Click) -> None:
+        meta = event.style.meta if event.style is not None else {}
+        row = meta.get("row", -1)
+        col = meta.get("column", -1)
+        is_data_cell = (
+            self.cursor_type == "row"
+            and isinstance(row, int)
+            and isinstance(col, int)
+            and 0 <= row < self.row_count
+            and col >= 0
+            and not meta.get("out_of_bounds", False)
+        )
+        if is_data_cell:
+            self.cursor_coordinate = Coordinate(row, col)
+            self._post_selected_message()
+        else:
+            await super()._on_click(event)
+        event.prevent_default()
+
+
+def make_table(*headers, cursor: str = "row", zebra: bool = True, classes: str = "tbl", **kwargs) -> ClickTable:
+    dt = ClickTable(cursor_type=cursor, zebra_stripes=zebra, classes=classes, **kwargs)
     dt.add_columns(*headers)
     return dt
 
 
 def load_rows(table: DataTable, rows: list) -> DataTable:
-    """全量重填表格。每行是可 add_row 展开的单元格序列（str 或 Text）。"""
+    """全量重填表格。每行是可被 add_row 展开的单元格序列（str 或 Text）。"""
     table.clear()
     for row in rows:
         table.add_row(*row)
     return table
 
 
+def shorten(text: str, limit: int) -> str:
+    """按显示宽度截断，超出部分以省略号结尾。"""
+    text = str(text)
+    if cell_len(text) <= limit:
+        return text
+    out = ""
+    for ch in text:
+        if cell_len(out + ch) > limit - 1:
+            break
+        out += ch
+    return out + "…"
+
+
+def mask_secret(v: str | None, keep: int = 4) -> str:
+    """密钥/口令脱敏展示：首尾各 keep 位，过短则全圆点（placeholder 专用）。"""
+    s = (v or "").strip()
+    if not s:
+        return ""
+    if len(s) <= keep * 2 + 1:
+        return "•" * min(8, max(6, len(s)))
+    return f"{s[:keep]}…{s[-keep:]}"
+
+
+def rcell(text, content_width: int) -> Text:
+    """右对齐单元格：文本在 content_width 内右对齐。"""
+    pad = max(0, content_width - cell_len(str(text)))
+    return Text(" " * pad + str(text))
+
+
+def fit_table_columns(table: DataTable, weights: list[float], rows: int | None = None) -> list[int]:
+    """按权重把表格可视内容宽（含每列左右各 1 空格 padding）瓜分给各列。
+
+    返回每列的可视宽度（含 padding），cell 的内容宽 = 可视宽 - 2。
+    需垂直滚动条时额外预留 2 列。传入 rows（即将装载的行数）可**确定性**预判滚动条，
+    避免依赖会变化的 max_scroll_y 导致首帧与二次布局算出不同列宽、右对齐列错位。
+    """
+    ncols = len(weights)
+    if rows is not None:
+        capacity = (table.region.height or 0) - 3  # 上下边框 + 表头
+        need_vbar = capacity <= 0 or rows > capacity
+    else:
+        need_vbar = table.max_scroll_y > 0
+    sbv = 2 if need_vbar else 0
+    avail = max(ncols * 4, (table.region.width or ncols * 20) - 2 - sbv)
+    total_w = sum(weights) or ncols
+    visible = [max(4, int(avail * w / total_w)) for w in weights]
+    # 舍入余量补给最宽列，保证恰好铺满
+    visible[visible.index(max(visible))] += avail - sum(visible)
+    for (_, column), vis in zip(table.columns.items(), visible, strict=True):
+        column.width = vis - 2  # Column.width 不含列内左右 padding
+        column.auto_width = False
+    table.refresh(layout=True)
+    return visible
+
+
 __all__ = [
-    "PickItem", "as_pick_items", "ConfirmModal", "InputModal", "PickModal",
-    "MultiPickModal", "FormField", "FormModal", "OutputModal",
-    "make_table", "load_rows", "filter_fuzzy", "tint", "colored_text",
-    "STYLE_OK", "STYLE_ERR", "STYLE_WARN", "STYLE_INFO",
-    "HINT_PICK", "HINT_MENU", "HINT_MULTI",
+    "ConfirmModal", "InputModal", "PickModal", "MultiPickModal", "FormField", "FormModal", "OutputModal",
+    "ClickTable", "make_table", "load_rows", "filter_fuzzy", "fuzzy_score",
+    "PickItem", "shorten", "rcell", "fit_table_columns",
+    "tint", "colored_text",
+    "STYLE_OK", "STYLE_ERR", "STYLE_WARN", "STYLE_INFO", "STYLE_DIM",
+    "HINT_PICK", "HINT_MENU", "HINT_FORM", "EDIT_HINT", "HINT_FORM_EDIT", "HINT_FORM_TA",
 ]

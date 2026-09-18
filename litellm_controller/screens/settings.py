@@ -1,44 +1,79 @@
-"""设置屏：LiteLLM 连接、Upstream 增删改、重置配置。"""
+"""设置屏：LiteLLM 连接、Upstream 增删改（ClickTable 单击 = 编辑）、重置配置。
+
+版式：连接信息 .panel（kv 行 + 编辑按钮）→ 操作 filter-row → Upstream 表格（单滚动条）；
+「重新配置并覆盖」为低频危险操作，放入顶栏 ⋮ 折叠菜单。
+"""
 import asyncio
 
 from rich.text import Text
 from textual import on, work
 from textual.binding import Binding
-from textual.containers import Horizontal
-from textual.screen import Screen
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Static
 
 from ..client import LiteLLMClient
 from ..config import load_config, save_config
+from ..ui import PageScreen
 from ..upstreams import UPSTREAM_TYPES
+from ..widgets import (
+    ConfirmModal,
+    FormField,
+    FormModal,
+    fit_table_columns,
+    load_rows,
+    make_table,
+    shorten,
+)
 from .setup import UpstreamFormModal, build_upstream, fetch_known_providers_for, mask_key
-from ..widgets import ConfirmModal, FormField, FormModal, PickItem, PickModal, load_rows, make_table
 
 
-class SettingsScreen(Screen):
-    BINDINGS = [Binding("escape", "back", "返回")]
+class SettingsScreen(PageScreen):
+    TITLE = "设置"
+    HINT = "↑↓ 移动 · 单击/回车 编辑 Upstream · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Esc/Ctrl+C 返回"
+
+    BINDINGS = [
+        Binding("ctrl+n", "new_up", "新增", show=False),
+        Binding("ctrl+e", "edit_up", "编辑", show=False),
+        Binding("ctrl+d", "delete_up", "删除", show=False),
+    ]
 
     def __init__(self):
         super().__init__()
         self._config: dict = {}
         self._known_providers: list = []
+        self._display: list = []
+        self.menu = [("重新配置并覆盖（向导）", self._reset, True)]
 
-    def compose(self):
-        yield Static(Text("设置", style="bold"), classes="page-title")
-        yield Static("", id="st-litellm", classes="page-hint")
-        with Horizontal(classes="toolbar"):
-            yield Button("编辑连接", id="edit_lit")
-            yield Button("＋ 添加 Upstream", id="add_up", variant="primary")
-            yield Button("重新配置并覆盖", id="reset")
-            yield Button("返回", id="back")
+    # ------------------------------------------------------------ 版式
+
+    def compose_page(self):
+        with Vertical(classes="panel"):
+            with Horizontal(classes="kv-row"):
+                yield Static("Endpoint", classes="kv-label")
+                yield Static("-", classes="kv-value", id="st-endpoint")
+            with Horizontal(classes="kv-row gap-top"):
+                yield Static("Key", classes="kv-label")
+                yield Static("-", classes="kv-value", id="st-key")
+            with Horizontal(classes="filter-row gap-top"):
+                yield Static(classes="fill")
+                yield Button("编辑连接", id="edit_lit")
+        with Vertical(classes="panel"):
+            with Horizontal(classes="filter-row"):
+                yield Static("Upstreams", classes="fl-label")
+                yield Static(classes="fill")
+                yield Button("＋ 添加", id="add_up", variant="primary")
+                yield Button("编辑", id="edit_up")
+                yield Button("删除", id="del_up", variant="error")
         table = make_table("名称", "类型", "Provider 绑定", "模型列表 URL", "Key")
         table.id = "st-table"
         yield table
-        yield Static("↑↓ 移动 · 回车 管理所选 Upstream · Esc 返回", classes="page-hint")
 
     def on_mount(self) -> None:
         self._load()
         self.query_one(DataTable).focus()
+
+    def reload_page(self) -> None:
+        self._load()
 
     @work(exclusive=True)
     async def _load(self) -> None:
@@ -48,10 +83,8 @@ class SettingsScreen(Screen):
             self.app.notify_err(f"配置读取失败: {e}")
             self._config = self.app.config or {}
         lit = self._config.get("litellm", {})
-        t = Text()
-        t.append("LiteLLM 连接: ", style="bold")
-        t.append(f"{lit.get('endpoint', '-')}   key={mask_key(lit.get('key', ''))}")
-        self.query_one("#st-litellm", Static).update(t)
+        self.query_one("#st-endpoint", Static).update(Text(str(lit.get("endpoint", "-")), style="bold"))
+        self.query_one("#st-key", Static).update(Text(mask_key(lit.get("key", "")), style="bold"))
         self._rebuild_table()
         if not self._known_providers:
             self.app.status("正在获取 LiteLLM 内置 Provider 列表…")
@@ -59,43 +92,56 @@ class SettingsScreen(Screen):
                 fetch_known_providers_for, lit
             )
 
-    def _rebuild_table(self) -> None:
+    def _rebuild_table(self, *, after_layout: bool = False) -> None:
+        upstreams = self._config.get("upstreams") or []
+        self._display = upstreams
+        table = self.query_one("#st-table", DataTable)
+        vis = fit_table_columns(table, [16, 14, 14, 30, 12], rows=len(upstreams))
         rows = []
-        for u in self._config.get("upstreams") or []:
+        for u in upstreams:
             rows.append([
-                Text(u.get("name", "?")),
-                Text(UPSTREAM_TYPES.get(u.get("type"), {}).get("label", u.get("type", "?"))),
-                Text(u.get("provider") or "未绑定", style="dim" if not u.get("provider") else ""),
-                Text(u.get("endpoint", "")),
-                Text(mask_key(u.get("key", ""))),
+                Text(shorten(u.get("name", "?"), vis[0] - 2)),
+                Text(shorten(UPSTREAM_TYPES.get(u.get("type"), {}).get("label", u.get("type", "?")), vis[1] - 2)),
+                Text(shorten(u.get("provider") or "未绑定", vis[2] - 2)),
+                Text(shorten(u.get("endpoint", ""), vis[3] - 2)),
+                Text(shorten(mask_key(u.get("key", "")), vis[4] - 2)),
             ])
-        load_rows(self.query_one("#st-table", DataTable), rows)
+        load_rows(table, rows)
+        self.set_subtitle(f"Upstreams {len(upstreams)} 个")
+        if not after_layout:
+            self.call_after_refresh(lambda: self._rebuild_table(after_layout=True))
+
+    def on_resize(self, event) -> None:
+        if self.is_mounted:
+            self._rebuild_table()
 
     # ------------------------------------------------------------ 行操作
 
     @on(DataTable.RowSelected, "#st-table")
     def _on_row(self, event: DataTable.RowSelected) -> None:
-        upstreams = self._config.get("upstreams") or []
-        if not (0 <= event.cursor_row < len(upstreams)):
-            return
-        name = upstreams[event.cursor_row].get("name", "?")
-        items = [
-            PickItem("edit", "编辑此 Upstream"),
-            PickItem("delete", "删除此 Upstream"),
-            PickItem("back", "[返回]"),
-        ]
-        self.app.push_screen(
-            PickModal(f"管理 Upstream: {name}", items),
-            lambda item: self._row_action(event.cursor_row, item),
-        )
+        # 一窗到底：直接进入编辑表单，删除按钮集成在表单内
+        self._edit_upstream(event.cursor_row)
 
-    def _row_action(self, index: int, item: PickItem | None) -> None:
-        if item is None:
-            return
-        if item.value == "edit":
-            self._edit_upstream(index)
-        elif item.value == "delete":
-            self._delete_upstream(index)
+    @on(Button.Pressed, "#add_up")
+    def _on_add_btn(self) -> None:
+        self._add_upstream()
+
+    @on(Button.Pressed, "#edit_up")
+    def _on_edit_btn(self) -> None:
+        self.action_edit_up()
+
+    @on(Button.Pressed, "#del_up")
+    def _on_del_btn(self) -> None:
+        self.action_delete_up()
+
+    def action_new_up(self) -> None:
+        self._add_upstream()
+
+    def action_edit_up(self) -> None:
+        self._edit_upstream(self.query_one("#st-table", DataTable).cursor_row)
+
+    def action_delete_up(self) -> None:
+        self._delete_upstream(self.query_one("#st-table", DataTable).cursor_row)
 
     # ------------------------------------------------------------ 连接
 
@@ -160,7 +206,6 @@ class SettingsScreen(Screen):
 
     # ------------------------------------------------------------ Upstream 增/改/删
 
-    @on(Button.Pressed, "#add_up")
     def _add_upstream(self) -> None:
         self.app.push_screen(
             UpstreamFormModal(self._known_providers),
@@ -195,7 +240,7 @@ class SettingsScreen(Screen):
 
     def _edit_upstream(self, index: int) -> None:
         upstreams = self._config.get("upstreams") or []
-        if index >= len(upstreams):
+        if index is None or not (0 <= index < len(upstreams)):
             return
         existing = upstreams[index]
         self.app.push_screen(
@@ -203,8 +248,11 @@ class SettingsScreen(Screen):
             lambda data: self._upstream_edited(index, data),
         )
 
-    def _upstream_edited(self, index: int, data: dict | None) -> None:
+    def _upstream_edited(self, index: int, data) -> None:
         if data is None:
+            return
+        if data == "frm-delete":
+            self._delete_upstream(index)
             return
         existing = self._config["upstreams"][index]
         new = build_upstream(data, existing=existing)
@@ -241,7 +289,7 @@ class SettingsScreen(Screen):
 
     def _delete_upstream(self, index: int) -> None:
         upstreams = self._config.get("upstreams") or []
-        if index >= len(upstreams):
+        if index is None or index >= len(upstreams):
             return
         name = upstreams[index]["name"]
         self.app.push_screen(
@@ -257,9 +305,8 @@ class SettingsScreen(Screen):
         self._load()
         self.app.notify_ok(f"Upstream [{name}] 已删除")
 
-    # ------------------------------------------------------------ 重置
+    # ------------------------------------------------------------ 重置（折叠菜单）
 
-    @on(Button.Pressed, "#reset")
     def _reset(self) -> None:
         self.app.push_screen(
             ConfirmModal(
@@ -281,10 +328,3 @@ class SettingsScreen(Screen):
             self._load()
         else:
             self.app.status("已取消重新配置")
-
-    @on(Button.Pressed, "#back")
-    def _on_back(self) -> None:
-        self.app.pop_screen()
-
-    def action_back(self) -> None:
-        self.app.pop_screen()

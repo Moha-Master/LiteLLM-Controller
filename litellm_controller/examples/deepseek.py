@@ -30,11 +30,11 @@ def is_peak_hour():
     # 获取北京时间 (UTC+8)
     tz_bj = timezone(timedelta(hours=8))
     now_bj = datetime.now(timezone.utc).astimezone(tz_bj)
-    
+
     # 周末非高峰
     if now_bj.weekday() >= 5: # 5: 周六, 6: 周日
         return False
-    
+
     hour = now_bj.hour
     # 高峰时段：09:00-12:00, 14:00-18:00
     return bool(9 <= hour < 12 or 14 <= hour < 18)
@@ -73,7 +73,7 @@ def main():
     }
 
     result = {MODEL_ID: entry}
-    
+
     # 打印日志到 stderr
     period_name = "高峰 (2x)" if peak else "谷价 (1x)"
     print(f"DeepSeek: 当前北京时间 {datetime.now(timezone(timedelta(hours=8))).strftime('%H:%M')}, "

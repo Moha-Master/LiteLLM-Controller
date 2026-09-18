@@ -1,104 +1,229 @@
-/* app.tcss — LiteLLM Controller TUI 样式 */
+/* app.tcss — LiteLLM Controller TUI 样式（与 aliyun / clash 项目保持同一套规范） */
 
 Screen {
     background: $surface;
 }
 
-/* ---------- 模态公共 ---------- */
+/* ---------- 按钮：全局单行（替代 compact，无边框；三项目一致） ---------- */
+Button {
+    height: 1;
+    border: none;
+    min-width: 0;
+    padding: 0 1;
+}
+
+Button:focus {
+    border: none;
+    text-style: bold reverse;
+}
+
+Button:disabled {
+    text-opacity: 60%;
+}
+
+/* ---------- 模态三段式：标题栏 / 内容 / 按钮栏 ---------- */
 .modal-box {
+    layout: vertical;
+    height: auto;
+    max-height: 90%;
     border: round $primary;
     background: $surface;
-    padding: 1 2;
+    padding: 0;
 }
 
 .modal-title {
     height: auto;
-    margin-bottom: 1;
+    padding: 0 2;
+    border-bottom: hkey $secondary;
+    content-align: left middle;
+}
+
+.modal-main {
+    height: auto;
+    padding: 1 2;
 }
 
 .btn-row {
     height: auto;
+    padding: 0 2;
+    border-top: hkey $secondary;
     align-horizontal: right;
-    margin-top: 1;
+    dock: bottom;
 }
 
 .btn-row Button {
     margin-left: 2;
 }
 
-.frm-browse-row {
-    height: auto;
-    width: 1fr;
-}
-
-.frm-browse-input {
-    width: 1fr;
-}
-
-/* ---------- 通用页头 ---------- */
-.page-title {
-    height: auto;
-    padding: 0 1;
-    text-style: bold;
-}
-
+/* ---------- 页面公共 ---------- */
 .page-hint {
-    height: auto;
+    height: 1;
     padding: 0 1;
     color: $text-muted;
 }
 
-.toolbar {
-    height: auto;
+/* ---------- 开关 / 勾选 / 单选控件：统一压成一行（同 aliyun 的 form switch 规则） ---------- */
+Switch,
+Checkbox,
+RadioButton {
+    height: 1;
+    border: none;
     padding: 0 1;
-    margin-top: 1;
+    background: transparent;
 }
 
-.toolbar Button,
-.toolbar Select {
+Switch:focus,
+Checkbox:focus,
+RadioButton:focus {
+    border: none;
+    background-tint: $foreground 8%;
+}
+
+.sub-toolbar {
+    height: auto;
+    margin: 1 1 0 1;
+    layout: horizontal;
+}
+
+.sub-toolbar Select {
     margin-right: 2;
 }
 
-/* ---------- 列表类页面 ---------- */
-.search-row {
-    height: auto;
-    padding: 0 1;
+.sub-toolbar .tb-note {
+    width: auto;
+    color: $text-muted;
+    margin-right: 1;
+    content-align: left middle;
 }
 
-.search-row Input {
+/* ---------- 内容区小容器（筛选 / 排序 / 主操作按钮） ---------- */
+.filter-row {
+    height: auto;
+    layout: horizontal;
+}
+
+.filter-row.gap-top {
+    margin-top: 1;
+}
+
+.filter-row .fl-label {
+    width: auto;
+    color: $text-muted;
+    margin-right: 1;
+    content-align: left middle;
+}
+
+.filter-row Input {
     width: 1fr;
 }
 
+.filter-row .fill {
+    width: 1fr;
+}
+
+.filter-row Select {
+    margin-right: 2;
+}
+
+.filter-row Button {
+    margin-left: 2;
+}
+
+/* ---------- 表格 ---------- */
 .tbl {
     height: 1fr;
     margin: 1 1 0 1;
     border: round $secondary;
+    overflow-x: hidden;
 }
 
 .tbl:focus {
-    border: tall $primary;
+    border: round $primary;
 }
 
-OptionList {
+/* ---------- 信息面板 ---------- */
+.panel {
+    height: auto;
+    margin: 1 1 0 1;
+    padding: 1 2;
     border: round $secondary;
 }
 
-/* ---------- 首页菜单 ---------- */
-#home-list {
-    width: 60;
-    height: auto;
-    margin: 2 0 0 0;
+/* ---------- 面板内键值行 ---------- */
+.kv-row {
+    height: 1;
+    layout: horizontal;
 }
 
-#home-title {
-    width: 60;
+.kv-row.gap-top {
+    margin-top: 1;
+}
+
+.kv-label {
+    width: 10;
+    color: $text-muted;
+    content-align: left middle;
+}
+
+.kv-value {
+    width: 1fr;
+    content-align: left middle;
+    text-style: bold;
+}
+
+/* ---------- 首页（居中 LOGO 版式，.logo-page） ---------- */
+#home-main {
+    height: 1fr;
+    align: center middle;
+}
+
+#home-col {
+    width: auto;
+    max-width: 90%;
     height: auto;
-    margin-top: 2;
+}
+
+#home-banner {
+    width: 1fr;
+    text-align: left;
+    color: $primary;
+}
+
+#home-plain {
+    width: 1fr;
     text-align: center;
+    color: $primary;
 }
 
-HomeScreen {
-    align-horizontal: center;
+#home-version {
+    width: 1fr;
+    text-align: right;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#home-list {
+    width: 1fr;
+    height: auto;
+    border: none;
+    background: transparent;
+}
+
+.logo-page #home-plain {
+    display: none;
+}
+
+.logo-page.-sm #home-banner {
+    display: none;
+}
+
+.logo-page.-sm #home-plain {
+    display: block;
+}
+
+.logo-page.-sm #home-col {
+    width: 1fr;
+    padding: 0 2;
 }
 
 /* ---------- 底部状态栏 ---------- */
@@ -113,12 +238,3 @@ HomeScreen {
 #status.ok { color: $success; }
 #status.warn { color: $warning; }
 #status.err { color: $error; }
-
-Footer {
-    background: $panel;
-}
-
-Header {
-    background: $panel;
-    color: $text;
-}

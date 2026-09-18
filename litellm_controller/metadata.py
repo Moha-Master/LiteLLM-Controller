@@ -9,9 +9,10 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 import requests
 
@@ -98,10 +99,10 @@ def format_header(name: str, description: str, priority: int, enabled: bool) -> 
 
 def update_script_meta_fields(
     path: Path,
-    enabled: Optional[bool] = None,
-    priority: Optional[int] = None,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
+    enabled: bool | None = None,
+    priority: int | None = None,
+    name: str | None = None,
+    description: str | None = None,
 ):
     """更新脚本头部配置字段。"""
     if not path.exists():
@@ -259,7 +260,7 @@ class MetadataManager:
             if not file_path.exists():
                 return {}
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8") as f:
                     data = json.load(f)
             except Exception as e:
                 raise MetadataError(f"读取基底文件 [upstream.json] 失败: {e}") from e
@@ -327,7 +328,7 @@ class MetadataManager:
 
         return final_map, logs
 
-    def export(self, data: dict[str, Any], out_path: Optional[Path] = None) -> Path:
+    def export(self, data: dict[str, Any], out_path: Path | None = None) -> Path:
         if out_path is None:
             out_path = self.get_output_path()
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -337,17 +338,19 @@ class MetadataManager:
         temp_path.replace(out_path)
         return out_path
 
-    def get_diff(self, new_data: dict[str, Any]) -> list[str]:
-        """与 Proxy 当前加载的 map 进行对比。"""
+    def get_diff_stats(self, new_data: dict[str, Any]) -> dict[str, Any]:
+        """与 Proxy 当前加载的 map 对比，返回结构化统计。
+
+        返回 {"ok": bool, "added": int, "changed": int, "removed": int, "total": int}。
+        ok=False 表示无法获取 Proxy 当前参数。
+        """
         try:
             current_map = self.client.fetch_model_cost_map()
         except Exception:
-            return ["无法获取 Proxy 当前参数，跳过对比。"]
+            return {"ok": False, "added": 0, "changed": 0, "removed": 0, "total": len(new_data)}
 
-        diffs = []
-        all_keys = set(new_data.keys()) | set(current_map.keys())
-        changed, added, removed = 0, 0, 0
-        for k in all_keys:
+        added, changed, removed = 0, 0, 0
+        for k in set(new_data.keys()) | set(current_map.keys()):
             if k not in current_map:
                 added += 1
             elif k not in new_data:
@@ -355,25 +358,22 @@ class MetadataManager:
             else:
                 c_entry = current_map[k]
                 n_entry = new_data[k]
-                is_changed = False
                 for f in ("input_cost_per_token", "output_cost_per_token", "max_input_tokens"):
                     if c_entry.get(f) != n_entry.get(f):
-                        is_changed = True
+                        changed += 1
                         break
-                if is_changed:
-                    changed += 1
-
-        diffs.append("变动:")
-        diffs.append(f"  新增条目: {added}")
-        diffs.append(f"  修改条目: {changed}")
-        diffs.append(f"  移除条目: {removed}")
-        diffs.append(f"  最终总计: {len(new_data)} 条")
-        return diffs
+        return {
+            "ok": True,
+            "added": added,
+            "changed": changed,
+            "removed": removed,
+            "total": len(new_data),
+        }
 
 
 # ---------------------------------------------------------------- 脚本执行与 default.py 读写
 
-def run_script(path: Path, timeout: int = 60) -> tuple[dict, Optional[str], Optional[str]]:
+def run_script(path: Path, timeout: int = 60) -> tuple[dict, str | None, str | None]:
     """运行 Python 脚本并返回其输出的 JSON 数据。
 
     返回 (data, error_message, stderr_output)：
@@ -411,7 +411,7 @@ def run_script(path: Path, timeout: int = 60) -> tuple[dict, Optional[str], Opti
         return {}, f"执行脚本时发生异常: {e}", None
 
 
-def read_default_py_data(path: Path) -> tuple[dict, Optional[str]]:
+def read_default_py_data(path: Path) -> tuple[dict, str | None]:
     """运行 default.py 获取其当前 DATA 字典。
 
     返回 (data, error_message)：
@@ -619,7 +619,7 @@ def config_summary(entry: dict) -> str:
 
 def generate_metadata(
     config: dict,
-    out_dir: Optional[Path] = None,
+    out_dir: Path | None = None,
     log: Callable[[str], None] = print,
 ) -> Path:
     """执行构建流程并导出最终 JSON（litellmctl metadata-gen 命令，非交互）。
@@ -637,8 +637,14 @@ def generate_metadata(
         log(entry)
 
     log("-" * 20)
-    for line in mgr.get_diff(data):
-        log(line)
+    stats = mgr.get_diff_stats(data)
+    if stats["ok"]:
+        log(f"  新增条目: {stats['added']}")
+        log(f"  修改条目: {stats['changed']}")
+        log(f"  移除条目: {stats['removed']}")
+        log(f"  最终总计: {stats['total']} 条")
+    else:
+        log("  无法获取 Proxy 当前参数，跳过对比。")
     log("-" * 20)
 
     if out_dir is None:

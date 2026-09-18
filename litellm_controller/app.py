@@ -4,7 +4,8 @@ from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Static
+from textual.binding import Binding
+from textual.widgets import Static
 
 from .client import LiteLLMClient
 from .config import config_exists, load_config
@@ -19,6 +20,11 @@ class LiteLLMControllerApp(App):
 
     CSS_PATH = Path(__file__).parent / "app.tcss"
     TITLE = "LiteLLM Controller"
+    ENABLE_COMMAND_PALETTE = False
+
+    BINDINGS = [
+        Binding("ctrl+q", "quit", "退出", priority=True),
+    ]
 
     def __init__(self):
         super().__init__()
@@ -56,9 +62,7 @@ class LiteLLMControllerApp(App):
     # ------------------------------------------------------------ 状态栏 / 提示
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
         yield StatusBar("", id="status")
-        yield Footer()
 
     def status(self, message: str, kind: str = "") -> None:
         try:
@@ -89,8 +93,8 @@ class LiteLLMControllerApp(App):
 
     @work(exclusive=True)
     async def _bootstrap(self) -> None:
-        from .screens.setup import SetupWizardScreen
         from .screens.home import HomeScreen
+        from .screens.setup import SetupWizardScreen
 
         err = None
         try:

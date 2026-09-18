@@ -112,7 +112,7 @@ def load_config() -> dict:
     config_path = get_config_path()
     if not config_path.exists():
         raise ValueError(f"配置文件不存在: {config_path}")
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict):
         raise ValueError("配置文件格式错误: 顶层必须是映射")
