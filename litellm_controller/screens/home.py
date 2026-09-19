@@ -26,10 +26,10 @@ class HomeScreen(Screen):
     ]
 
     ITEMS = [
-        ("manage_models", "模型管理", "查看 / 添加 / 编辑 / 禁用 / 删除模型与参数"),
+        ("manage_models", "模型管理", "管理模型与参数"),
         ("manage_routing", "路由管理", "路由组增删改与失效模型清理"),
         ("settings", "设置", "LiteLLM 连接与 Upstream 配置"),
-        ("quit", "退出程序", "保存配置并退出"),
+        ("quit", "退出程序", "结束操作并退出"),
     ]
 
     def compose(self):
