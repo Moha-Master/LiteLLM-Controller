@@ -264,6 +264,9 @@ litellm_controller/
 - 有搜索框的页面（Scripts/DefaultEditor）键位避开 `Ctrl+E/D`（§7.2）；`/` + `Ctrl+N` 为唯一新增入口，条目操作全部经模态表单。
 - 路由组写回遵循「读-改-写」：保存前 `get_router_settings` 重新拉最新 groups，避免覆盖他人改动。
 - `cost_map` 价格统一以 $/1M tokens 输入、`round(x/1e6, 12)` 存储。
+- `ModelFormScreen` 包含内置模型名搜索框（`#mapping-search`）；在 `add` 模式下对已在代理上配置的模型名使用 warning 色高亮提醒，避免批量添加时冲突。
+- `GroupFormScreen`（路由组管理）自动从成员列表中排除已被其他路由组占用的模型（显示为 dim/disabled），保证模型归属排他性。
+- `Select` (Textual) 的 `prompt` 已包含空白项。当 `prompt` 为 `[不绑定 Credential]` 时，`options` 中无需手动追加 `("",)` 项，否则会出现重复。
 - tests/ 目录为本项目历史保留（其余项目不提交测试文件）；UI 验证脚本在 `/tmp/opencode/litellm_ui_check.py`（54 断言，含脚本设置回写）。
 
 ## 依赖与质量

@@ -34,12 +34,20 @@ from ..widgets import ConfirmModal
 class ModelMappingRow(Static):
     """单条模型映射行：勾选框/单选框 + Model Name + Public Name + 删除按钮。"""
 
-    def __init__(self, model_name: str = "", public_name: str = "", checked: bool = True, is_radio: bool = False):
-        super().__init__()
+    def __init__(
+        self,
+        model_name: str = "",
+        public_name: str = "",
+        checked: bool = True,
+        is_radio: bool = False,
+        is_existing: bool = False,
+    ):
+        super().__init__(classes="existing-row" if is_existing else "")
         self.model_name_init = model_name
         self.public_name_init = public_name
         self.checked_init = checked
         self.is_radio = is_radio
+        self.is_existing = is_existing
 
     def compose(self) -> ComposeResult:
         if self.is_radio:
@@ -91,30 +99,38 @@ class ModelFormScreen(ModalScreen[bool]):
     }
     #mapping-section {
         border: round $secondary;
-        padding: 1;
-        height: 16;
+        padding: 0 1;
+        height: 22;
         margin-bottom: 1;
         layout: vertical;
     }
     .mapping-actions {
         layout: horizontal;
         height: auto;
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
     .mapping-actions > Button {
         width: 1fr;
+    }
+    #btn-fetch-litellm {
         margin-right: 1;
     }
     #mapping-list {
         height: 1fr;
         border: round $surface;
-        padding: 1;
+        padding: 0 1;
+    }
+    #mapping-search {
+        margin-bottom: 0;
     }
     ModelMappingRow {
         layout: horizontal;
         height: auto;
         align: left middle;
         margin-bottom: 1;
+    }
+    ModelMappingRow.existing-row > Input {
+        color: $warning;
     }
     ModelMappingRow > .row-check {
         width: auto;
@@ -182,6 +198,7 @@ class ModelFormScreen(ModalScreen[bool]):
         self.model_data = model_data or {}
         self._cost_map = {}
         self._credentials = []
+        self._existing_models: set[str] = set()
 
     def compose(self) -> ComposeResult:
         title_map = {
@@ -213,6 +230,7 @@ class ModelFormScreen(ModalScreen[bool]):
                         yield Button("从 Upstream 获取", id="btn-fetch-upstream", variant="primary")
 
                     with VerticalScroll(id="mapping-list"):
+                        yield Input(placeholder="搜索/过滤已添加的模型映射...", compact=True, id="mapping-search")
                         if self.mode == "add":
                             yield ManualAddRow()
                         # Mapping rows dynamically populated on mount/fetch
@@ -284,8 +302,21 @@ class ModelFormScreen(ModalScreen[bool]):
         except Exception:
             self._credentials = []
 
+        try:
+            existing_models = await asyncio.to_thread(client.list_models)
+            self._existing_models = set()
+            for m in existing_models:
+                name = m.get("model_name")
+                if name:
+                    self._existing_models.add(str(name).strip())
+                lp = m.get("litellm_params") or {}
+                if lp.get("model"):
+                    self._existing_models.add(str(lp["model"]).strip())
+        except Exception:
+            self._existing_models = set()
+
         cred_rows = credential_display(self._credentials)
-        cred_opts = [("[不绑定 Credential]", "")] + [(f"{c['name']} ({c['provider']})", c['name']) for c in cred_rows]
+        cred_opts = [(f"{c['name']} ({c['provider']})", c['name']) for c in cred_rows]
         cur_cred = cur_params.get("litellm_credential_name") or ""
         if cur_cred and cur_cred not in {c["name"] for c in cred_rows}:
             cred_opts.append((cur_cred, cur_cred))
@@ -370,13 +401,59 @@ class ModelFormScreen(ModalScreen[bool]):
     # ------------------------------------------------------------ 增删 Mapping 行
 
     def _add_mapping_row(self, model_name: str = "", public_name: str = "", checked: bool = True, is_radio: bool = False) -> None:
+        is_existing = False
+        if self.mode == "add":
+            m_cleaned = model_name.strip()
+            p_cleaned = public_name.strip()
+            if m_cleaned and m_cleaned in self._existing_models:
+                is_existing = True
+            elif p_cleaned and p_cleaned in self._existing_models:
+                is_existing = True
+
         lst = self.query_one("#mapping-list")
-        row = ModelMappingRow(model_name, public_name, checked, is_radio)
+        row = ModelMappingRow(model_name, public_name, checked, is_radio, is_existing=is_existing)
         lst.mount(row)
+
+    @on(Input.Changed, ".row-model-name, .row-public-name")
+    def _on_mapping_input_changed(self, event: Input.Changed) -> None:
+        if self.mode != "add":
+            return
+        row = event.input.parent
+        if isinstance(row, ModelMappingRow):
+            m_val = row.query_one(".row-model-name", Input).value.strip()
+            p_val = row.query_one(".row-public-name", Input).value.strip()
+            is_exist = False
+            if self._existing_models:
+                if m_val and m_val in self._existing_models:
+                    is_exist = True
+                elif p_val and p_val in self._existing_models:
+                    is_exist = True
+            row.set_class(is_exist, "existing-row")
 
     @on(Button.Pressed, "#row-manual-add")
     def _manual_add_row(self) -> None:
-        self._add_mapping_row(checked=True)
+        lst = self.query_one("#mapping-list")
+        row = ModelMappingRow(checked=True)
+        try:
+            manual_add = self.query_one(ManualAddRow)
+            lst.mount(row, after=manual_add)
+        except Exception:
+            lst.mount(row)
+
+        try:
+            search_input = self.query_one("#mapping-search", Input)
+            if search_input.value:
+                search_input.value = ""
+        except Exception:
+            pass
+
+    @on(Input.Changed, "#mapping-search")
+    def _on_mapping_search(self, event: Input.Changed) -> None:
+        q = event.value.strip().lower()
+        for row in self.query(ModelMappingRow):
+            m_name = row.query_one(".row-model-name", Input).value.lower()
+            p_name = row.query_one(".row-public-name", Input).value.lower()
+            row.display = (not q) or (q in m_name or q in p_name)
 
     @on(Button.Pressed, ".row-delete")
     def _delete_row(self, event: Button.Pressed) -> None:
@@ -482,10 +559,14 @@ class ModelFormScreen(ModalScreen[bool]):
     def _merge_fetched_models(self, fetched_models: list[str]) -> None:
         """合并拉取结果。
 
-        - add 模式：保留勾选（固定）的条目，替换未勾选的，追加新条目（默认勾选）。
+        - add 模式：保留勾选（固定）的条目，替换未勾选的，追加新条目（默认不勾选）。
         - edit 模式：单选语义；用候选列表替换当前行，并尽量保留当前所选项。
         """
         fetched_models = [str(m).strip() for m in fetched_models if str(m).strip()]
+        try:
+            self.query_one("#mapping-search", Input).value = ""
+        except Exception:
+            pass
 
         if self.mode == "add":
             kept: dict[str, str] = {}
@@ -500,7 +581,7 @@ class ModelFormScreen(ModalScreen[bool]):
                 self._add_mapping_row(m, p, checked=True)
             for model in fetched_models:
                 if model not in kept:
-                    self._add_mapping_row(model, model, checked=True)
+                    self._add_mapping_row(model, model, checked=False)
             return
 
         # edit 模式：只允许一个

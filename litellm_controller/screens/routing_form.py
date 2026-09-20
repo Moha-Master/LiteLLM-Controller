@@ -75,6 +75,7 @@ class GroupFormScreen(ModalScreen[bool]):
         self.mode = mode
         self.group_data = group_data or {}
         self._all_models = []  # 缓存所有模型名用于筛选
+        self._model_to_group: dict[str, str] = {}  # 记录模型被其他哪个路由组占用: {model_name: group_name}
         self._selected_members = set(self.group_data.get("models", []))
 
     def compose(self) -> ComposeResult:
@@ -136,9 +137,21 @@ class GroupFormScreen(ModalScreen[bool]):
             models = await asyncio.to_thread(client.list_models)
             self._all_models = [m.get("model_name") for m in models if m.get("model_name")]
             self._all_models = sorted(set(self._all_models))
+
+            # 读取路由组设置，查找已被其他组占用的模型
+            router_settings = await asyncio.to_thread(client.get_router_settings)
+            groups = (router_settings.get("current_values") or {}).get("routing_groups") or []
+            cur_group_name = self.group_data.get("group_name")
+            self._model_to_group = {}
+            for g in groups:
+                gname = g.get("group_name")
+                if gname and gname != cur_group_name:
+                    for m in g.get("models") or []:
+                        self._model_to_group[m] = gname
         except Exception as e:
             self.app.notify_err(f"加载模型列表失败: {e}")
             self._all_models = []
+            self._model_to_group = {}
 
     def _rebuild_list(self, filter_text: str = "") -> None:
         sel = self.query_one("#member-list", SelectionList)
@@ -152,7 +165,12 @@ class GroupFormScreen(ModalScreen[bool]):
         for m in filtered:
             # 标记是否已被当前组选中
             is_selected = m in self._selected_members
-            options.append(Selection(m, m, is_selected))
+            other_group = self._model_to_group.get(m)
+            if other_group and not is_selected:
+                label = Text(f"{m} (已加入: {other_group})", style="dim")
+                options.append(Selection(label, m, False, disabled=True))
+            else:
+                options.append(Selection(m, m, is_selected))
 
         sel.clear_options()
         sel.add_options(options)
@@ -171,13 +189,10 @@ class GroupFormScreen(ModalScreen[bool]):
     def _on_selected_changed(self, event: SelectionList.SelectedChanged) -> None:
         # 同步增量更新
         self._selected_members.update(set(event.selection_list.selected))
-        # 注意：如果取消勾选，也需要从 set 中移除，但只能移除当前可见列表里的
-        # 这里逻辑稍微复杂，简化处理：每次 SelectedChanged 时，我们把当前可见且未被勾选的从 set 中剔除
-        visible_items = {opt.value for opt in event.selection_list.options}
         currently_selected = set(event.selection_list.selected)
-        for val in visible_items:
-            if val not in currently_selected:
-                self._selected_members.discard(val)
+        for opt in event.selection_list.options:
+            if not opt.disabled and opt.value not in currently_selected:
+                self._selected_members.discard(opt.value)
 
     @on(Button.Pressed, "#btn-switch-edit")
     def _switch_edit_mode(self) -> None:
