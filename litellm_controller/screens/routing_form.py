@@ -10,7 +10,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, SelectionList, Static
 from textual.widgets.selection_list import Selection
 
-from ..widgets import ConfirmModal, filter_fuzzy
+from ..widgets import ConfirmModal, busy, filter_fuzzy
 
 
 class GroupFormScreen(ModalScreen[bool]):
@@ -132,6 +132,8 @@ class GroupFormScreen(ModalScreen[bool]):
     # ------------------------------------------------------------ 逻辑处理
 
     async def _load_all_models(self) -> None:
+        sel = self.query_one("#member-list", SelectionList)
+        sel.loading = True
         client = self.app.get_client()
         try:
             models = await asyncio.to_thread(client.list_models)
@@ -152,6 +154,8 @@ class GroupFormScreen(ModalScreen[bool]):
             self.app.notify_err(f"加载模型列表失败: {e}")
             self._all_models = []
             self._model_to_group = {}
+        finally:
+            sel.loading = False
 
     def _rebuild_list(self, filter_text: str = "") -> None:
         sel = self.query_one("#member-list", SelectionList)
@@ -268,28 +272,29 @@ class GroupFormScreen(ModalScreen[bool]):
     async def _do_save(self, name: str, strategy: str, models: list[str]) -> None:
         client = self.app.get_client()
         try:
-            settings = await asyncio.to_thread(client.get_router_settings)
-            groups = settings.get("current_values", {}).get("routing_groups") or []
+            async with busy(self.app, "正在保存路由组…", mode="dots"):
+                settings = await asyncio.to_thread(client.get_router_settings)
+                groups = settings.get("current_values", {}).get("routing_groups") or []
 
-            # 如果是 edit 模式，先移除旧的
-            if self.mode == "edit":
-                old_name = self.group_data.get("group_name")
-                groups = [g for g in groups if g.get("group_name") != old_name]
+                # 如果是 edit 模式，先移除旧的
+                if self.mode == "edit":
+                    old_name = self.group_data.get("group_name")
+                    groups = [g for g in groups if g.get("group_name") != old_name]
 
-            # 检查同名冲突 (add 模式)
-            if self.mode == "add" and any(g.get("group_name") == name for g in groups):
-                self.app.notify_err(f"路由组名称 {name} 已存在")
-                return
+                # 检查同名冲突 (add 模式)
+                if self.mode == "add" and any(g.get("group_name") == name for g in groups):
+                    self.app.notify_err(f"路由组名称 {name} 已存在")
+                    return
 
-            # 添加/更新
-            groups.append({
-                "group_name": name,
-                "models": models,
-                "routing_strategy": strategy
-            })
+                # 添加/更新
+                groups.append({
+                    "group_name": name,
+                    "models": models,
+                    "routing_strategy": strategy
+                })
 
-            await asyncio.to_thread(lambda: client.update_router_settings({"routing_groups": groups}))
-            self.app.notify_ok(f"路由组 {name} 已保存")
+                await asyncio.to_thread(lambda: client.update_router_settings({"routing_groups": groups}))
+                self.app.notify_ok(f"路由组 {name} 已保存")
             self.dismiss(True)
         except Exception as e:
             self.app.notify_err(f"保存失败: {e}")

@@ -136,13 +136,19 @@ class RoutingListScreen(PageScreen):
     async def _load(self) -> None:
         client = self.app.get_client()
         self.app.status("正在获取路由组…")
+        table = self.query_one("#rt-table", DataTable)
+        table.loading = True
         try:
-            data = await asyncio.to_thread(load_routing_data, client)
-        except LiteLLMError as e:
-            self.app.notify_err(f"获取路由组失败: {e}")
-            data = {"groups": [], "strategies": [], "models_by_name": {}, "global_strategy": ""}
-        self._data = data
-        self._rebuild()
+            try:
+                data = await asyncio.to_thread(load_routing_data, client)
+            except LiteLLMError as e:
+                self.app.notify_err(f"获取路由组失败: {e}")
+                data = {"groups": [], "strategies": [], "models_by_name": {}, "global_strategy": ""}
+            self._data = data
+            self._rebuild()
+        finally:
+            table.loading = False
+            table.focus()
 
     def _rebuild(self, *, after_layout: bool = False) -> None:
         groups = sorted(self._data["groups"], key=lambda g: g.get("group_name") or "")

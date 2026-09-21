@@ -47,6 +47,7 @@ from ..widgets import (
     InputModal,
     PickItem,
     PickModal,
+    busy,
     filter_fuzzy,
     fit_table_columns,
     load_rows,
@@ -145,8 +146,9 @@ class BuildScreen(PageScreen):
         client = self.app.get_client()
         mgr = eng.MetadataManager(client, self.app.config)
         try:
-            data, logs = await asyncio.to_thread(mgr.build)
-            stats = await asyncio.to_thread(mgr.get_diff_stats, data)
+            async with busy(self.app, "正在构建模型参数…", mode="dots"):
+                data, logs = await asyncio.to_thread(mgr.build)
+                stats = await asyncio.to_thread(mgr.get_diff_stats, data)
         except Exception as e:
             self.query_one("#build-log", TextArea).text = f"构建失败: {e}"
             self.query_one("#build-summary", Static).update(Text("构建失败", style=STYLE_ERR))
@@ -185,7 +187,8 @@ class BuildScreen(PageScreen):
             return
         mgr = eng.MetadataManager(self.app.get_client(), self.app.config)
         try:
-            path = await asyncio.to_thread(mgr.export, self._data)
+            async with busy(self.app, "正在导出模型参数…", mode="dots"):
+                path = await asyncio.to_thread(mgr.export, self._data)
             self.app.notify_ok(f"成功导出至: {path}")
         except Exception as e:
             self.app.notify_err(f"导出失败: {e}")

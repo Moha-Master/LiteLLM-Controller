@@ -101,15 +101,21 @@ class ModelListScreen(PageScreen):
     async def _load(self) -> None:
         client = self.app.get_client()
         self.app.status("正在获取模型列表…")
+        table = self.query_one("#ml-table", DataTable)
+        table.loading = True
         try:
-            models = await asyncio.to_thread(client.list_models)
-        except LiteLLMError as e:
-            self.app.notify_err(f"获取模型列表失败: {e}")
-            self._models = []
+            try:
+                models = await asyncio.to_thread(client.list_models)
+            except LiteLLMError as e:
+                self.app.notify_err(f"获取模型列表失败: {e}")
+                self._models = []
+                self._rebuild()
+                return
+            self._models = models
             self._rebuild()
-            return
-        self._models = models
-        self._rebuild()
+        finally:
+            table.loading = False
+            table.focus()
 
     def _rebuild(self, *, after_layout: bool = False) -> None:
         models = sorted_models(self._models, self._sort_key)

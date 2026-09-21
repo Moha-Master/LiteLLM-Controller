@@ -28,7 +28,7 @@ from ..client import LiteLLMError
 from ..config import cost_map_providers
 from ..modeldata import credential_display, fmt_cost
 from ..upstreams import fetch_upstream_models
-from ..widgets import ConfirmModal
+from ..widgets import ConfirmModal, busy
 
 
 class ModelMappingRow(Static):
@@ -546,6 +546,8 @@ class ModelFormScreen(ModalScreen[bool]):
     @work(exclusive=True)
     async def _do_fetch_upstream(self, upstream: dict) -> None:
         self.app.status(f"正在从上游 {upstream['name']} 联网获取模型列表…")
+        lst = self.query_one("#mapping-list", VerticalScroll)
+        lst.loading = True
         try:
             models = await asyncio.to_thread(lambda: fetch_upstream_models(upstream, timeout=15))
             if not models:
@@ -555,6 +557,8 @@ class ModelFormScreen(ModalScreen[bool]):
             self.app.notify_ok(f"成功获取并合并 {len(models)} 个上游模型")
         except Exception as e:
             self.app.notify_err(f"从上游获取模型失败: {e}")
+        finally:
+            lst.loading = False
 
     def _merge_fetched_models(self, fetched_models: list[str]) -> None:
         """合并拉取结果。
@@ -724,47 +728,48 @@ class ModelFormScreen(ModalScreen[bool]):
     async def _do_save(self, provider: str, mappings: list[tuple[str, str]], credential: str, model_info: dict, custom_params: dict) -> None:
         client = self.app.get_client()
         try:
-            if self.mode == "add":
-                # 批量添加
-                count = 0
-                for model_name, public_name in mappings:
+            async with busy(self.app, "正在保存模型…", mode="dots"):
+                if self.mode == "add":
+                    # 批量添加
+                    count = 0
+                    for model_name, public_name in mappings:
+                        lp = {
+                            "model": model_name,
+                            "custom_llm_provider": provider,
+                        }
+                        if credential:
+                            lp["litellm_credential_name"] = credential
+                        # 合并自定义 parameters
+                        lp.update(custom_params)
+
+                        await asyncio.to_thread(
+                            lambda pn=public_name, params=lp: client.create_model(
+                                model_name=pn,
+                                litellm_params=params,
+                                model_info=model_info or None,
+                            )
+                        )
+                        count += 1
+                    self.app.notify_ok(f"成功批量导入 {count} 个模型")
+                else:
+                    # 修改单模型
+                    mid = (self.model_data.get("model_info") or {}).get("id")
+                    model_name, public_name = mappings[0]
                     lp = {
                         "model": model_name,
                         "custom_llm_provider": provider,
                     }
                     if credential:
                         lp["litellm_credential_name"] = credential
-                    # 合并自定义 parameters
                     lp.update(custom_params)
 
-                    await asyncio.to_thread(
-                        lambda pn=public_name, params=lp: client.create_model(
-                            model_name=pn,
-                            litellm_params=params,
-                            model_info=model_info or None,
-                        )
-                    )
-                    count += 1
-                self.app.notify_ok(f"成功批量导入 {count} 个模型")
-            else:
-                # 修改单模型
-                mid = (self.model_data.get("model_info") or {}).get("id")
-                model_name, public_name = mappings[0]
-                lp = {
-                    "model": model_name,
-                    "custom_llm_provider": provider,
-                }
-                if credential:
-                    lp["litellm_credential_name"] = credential
-                lp.update(custom_params)
-
-                await asyncio.to_thread(lambda: client.update_model(
-                    mid,
-                    model_name=public_name,
-                    litellm_params=lp,
-                    model_info=model_info or None,
-                ))
-                self.app.notify_ok(f"模型 {public_name} 修改已保存")
+                    await asyncio.to_thread(lambda: client.update_model(
+                        mid,
+                        model_name=public_name,
+                        litellm_params=lp,
+                        model_info=model_info or None,
+                    ))
+                    self.app.notify_ok(f"模型 {public_name} 修改已保存")
 
             self.dismiss(True)
         except LiteLLMError as e:
