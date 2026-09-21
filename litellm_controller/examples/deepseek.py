@@ -3,7 +3,7 @@
 NAME = "DeepSeek 动态时段计费元数据"
 DESCRIPTION = "根据北京时间动态输出 DeepSeek 模型的高峰/非高峰时段定价"
 PRIORITY = 30
-ENABLED = False
+ENABLED = True
 # -------------------------
 """DeepSeek 动态时段计费生成脚本。
 
@@ -32,7 +32,7 @@ def is_peak_hour():
     now_bj = datetime.now(timezone.utc).astimezone(tz_bj)
 
     # 周末非高峰
-    if now_bj.weekday() >= 5: # 5: 周六, 6: 周日
+    if now_bj.weekday() >= 5:  # 5: 周六, 6: 周日
         return False
 
     hour = now_bj.hour
@@ -63,13 +63,19 @@ def main():
         "input_cost_per_token": prices["input"],
         "output_cost_per_token": prices["output"],
         "cache_read_input_token_cost": prices["cache_read"],
-        "max_input_tokens": 128000,
-        "max_output_tokens": 8192,
+        "max_input_tokens": 1000000,
+        "max_output_tokens": 393216,
+        "max_tokens": 393216,
         "litellm_provider": "deepseek",
         "mode": "chat",
+        "supports_vision": True,
+        "supports_reasoning": True,
         "supports_function_calling": True,
-        "supports_vision": False,
-        "source": "https://api-docs.deepseek.com/quick_start/pricing"
+        "supports_prompt_caching": True,
+        "supports_response_schema": True,
+        "supports_tool_choice": True,
+        "supports_system_messages": True,
+        "source": "https://api-docs.deepseek.com/quick_start/pricing",
     }
 
     result = {MODEL_ID: entry}
