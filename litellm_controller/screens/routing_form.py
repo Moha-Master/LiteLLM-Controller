@@ -229,22 +229,24 @@ class GroupFormScreen(ModalScreen[bool]):
 
     @on(Button.Pressed, "#btn-delete")
     def _on_delete_press(self) -> None:
-        name = self.group_data.get("group_name", "?")
-        self.app.push_screen(
-            ConfirmModal(f"确认删除路由组 {name}？", title="删除路由组", default_yes=False, yes="确认删除"),
-            lambda ok: self._do_delete() if ok else None
-        )
+        self._run_delete()
 
     @work(exclusive=True)
-    async def _do_delete(self) -> None:
+    async def _run_delete(self) -> None:
+        name = self.group_data.get("group_name", "?")
+        ok = await self.app.push_screen_wait(
+            ConfirmModal(f"确认删除路由组 {name}？", title="删除路由组", default_yes=False, yes="确认删除")
+        )
+        if not ok:
+            return
         client = self.app.get_client()
-        name = self.group_data.get("group_name")
         try:
-            # 路由组删除通常是更新设置，将其从列表移除
-            settings = await asyncio.to_thread(client.get_router_settings)
-            groups = settings.get("current_values", {}).get("routing_groups") or []
-            new_groups = [g for g in groups if g.get("group_name") != name]
-            await asyncio.to_thread(lambda: client.update_router_settings({"routing_groups": new_groups}))
+            async with busy(self.app, "正在删除路由组…", mode="bar"):
+                # 路由组删除通常是更新设置，将其从列表移除
+                settings = await asyncio.to_thread(client.get_router_settings)
+                groups = settings.get("current_values", {}).get("routing_groups") or []
+                new_groups = [g for g in groups if g.get("group_name") != name]
+                await asyncio.to_thread(lambda: client.update_router_settings({"routing_groups": new_groups}))
             self.app.notify_ok(f"路由组 {name} 已删除")
             self.dismiss(True)
         except Exception as e:
@@ -272,7 +274,7 @@ class GroupFormScreen(ModalScreen[bool]):
     async def _do_save(self, name: str, strategy: str, models: list[str]) -> None:
         client = self.app.get_client()
         try:
-            async with busy(self.app, "正在保存路由组…", mode="dots"):
+            async with busy(self.app, "正在保存路由组…", mode="bar"):
                 settings = await asyncio.to_thread(client.get_router_settings)
                 groups = settings.get("current_values", {}).get("routing_groups") or []
 

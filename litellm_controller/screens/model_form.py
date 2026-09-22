@@ -26,7 +26,8 @@ from textual.widgets import (
 
 from ..client import LiteLLMError
 from ..config import cost_map_providers
-from ..modeldata import credential_display, fmt_cost
+from ..metadata import cost_m_str
+from ..modeldata import credential_display
 from ..upstreams import fetch_upstream_models
 from ..widgets import ConfirmModal, busy
 
@@ -54,9 +55,9 @@ class ModelMappingRow(Static):
             yield RadioButton(value=self.checked_init, classes="row-check")
         else:
             yield Checkbox(value=self.checked_init, classes="row-check")
+        yield Input(self.public_name_init, placeholder="Public Name", compact=True, classes="row-public-name")
         yield Input(self.model_name_init, placeholder="Model Name (LiteLLM Name)", compact=True,
                     classes="row-model-name")
-        yield Input(self.public_name_init, placeholder="Public Name", compact=True, classes="row-public-name")
         yield Button("✕", variant="error", classes="row-delete")
 
 
@@ -355,10 +356,10 @@ class ModelFormScreen(ModalScreen[bool]):
             self.credential_select.value = cred
 
         # Fill Advanced
-        self.query_one("#adv-in-cost", Input).value = fmt_cost(info.get("input_cost_per_token"))
-        self.query_one("#adv-out-cost", Input).value = fmt_cost(info.get("output_cost_per_token"))
-        self.query_one("#adv-cache-read", Input).value = fmt_cost(info.get("cache_read_input_token_cost"))
-        self.query_one("#adv-cache-write", Input).value = fmt_cost(info.get("cache_creation_input_token_cost"))
+        self.query_one("#adv-in-cost", Input).value = cost_m_str(info.get("input_cost_per_token"))
+        self.query_one("#adv-out-cost", Input).value = cost_m_str(info.get("output_cost_per_token"))
+        self.query_one("#adv-cache-read", Input).value = cost_m_str(info.get("cache_read_input_token_cost"))
+        self.query_one("#adv-cache-write", Input).value = cost_m_str(info.get("cache_creation_input_token_cost"))
         self.query_one("#adv-order", Input).value = str(info.get("order") or "")
         self.query_one("#adv-weight", Input).value = str(info.get("weight") or "")
 
@@ -624,21 +625,29 @@ class ModelFormScreen(ModalScreen[bool]):
 
     @on(Button.Pressed, "#btn-delete")
     def _on_delete_press(self) -> None:
-        name = self.model_data.get("model_name", "?")
-        self.app.push_screen(
-            ConfirmModal(f"确认删除模型 {name}？此操作不可恢复。", title="删除模型", default_yes=False, yes="确认删除"),
-            lambda ok: self._do_delete() if ok else None
-        )
+        self._run_delete()
 
     @work(exclusive=True)
-    async def _do_delete(self) -> None:
+    async def _run_delete(self) -> None:
+        name = self.model_data.get("model_name", "?")
+        ok = await self.app.push_screen_wait(
+            ConfirmModal(
+                f"确认删除模型 {name}？此操作不可恢复。",
+                title="删除模型",
+                default_yes=False,
+                yes="确认删除",
+            )
+        )
+        if not ok:
+            return
         client = self.app.get_client()
         mid = (self.model_data.get("model_info") or {}).get("id")
         if not mid:
             self.app.notify_warn("缺失模型数据库 ID")
             return
         try:
-            await asyncio.to_thread(lambda: client.delete_model(mid))
+            async with busy(self.app, "正在删除模型…", mode="bar"):
+                await asyncio.to_thread(lambda: client.delete_model(mid))
             self.app.notify_ok("模型已删除")
             self.dismiss(True)
         except Exception as e:
@@ -728,7 +737,7 @@ class ModelFormScreen(ModalScreen[bool]):
     async def _do_save(self, provider: str, mappings: list[tuple[str, str]], credential: str, model_info: dict, custom_params: dict) -> None:
         client = self.app.get_client()
         try:
-            async with busy(self.app, "正在保存模型…", mode="dots"):
+            async with busy(self.app, "正在保存模型…", mode="bar"):
                 if self.mode == "add":
                     # 批量添加
                     count = 0
