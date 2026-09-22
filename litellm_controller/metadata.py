@@ -323,6 +323,25 @@ class MetadataManager:
 
                 model_origin[k] = (meta, meta.priority)
 
+            # key 前缀归一：provider=xxx 但 key 无 xxx/ 前缀时，内部拼上
+            to_pop = []
+            for k, v in list(data.items()):
+                prov = v.get("litellm_provider") if isinstance(v, dict) else None
+                if prov and not k.startswith(f"{prov}/"):
+                    nk = f"{prov}/{k}"
+                    if nk in data:
+                        deep_merge(data[nk], v)
+                    else:
+                        data[nk] = v
+                    to_pop.append(k)
+            for k in to_pop:
+                data.pop(k)
+                model_origin.pop(k, None)
+                logs.append(f"  前缀归一: [{k}] -> [{prov}/{k}]")
+            for k in data:
+                if k not in model_origin:
+                    model_origin[k] = (meta, meta.priority)
+
             deep_merge(final_map, data)
             logs.append(f"已执行 [{meta.name}] -> {len(data)} 个模型条目 (PRIORITY={meta.priority})")
 
