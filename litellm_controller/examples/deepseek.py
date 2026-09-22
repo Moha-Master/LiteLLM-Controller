@@ -3,7 +3,7 @@
 NAME = "DeepSeek 动态时段计费元数据"
 DESCRIPTION = "根据北京时间动态输出 DeepSeek 模型的高峰/非高峰时段定价"
 PRIORITY = 30
-ENABLED = True
+ENABLED = False
 # -------------------------
 """DeepSeek 动态时段计费生成脚本。
 

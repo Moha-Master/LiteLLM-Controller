@@ -84,6 +84,10 @@ def main():
         if cache_read is not None:
             entry["cache_read_input_token_cost"] = cache_read
 
+        cache_write = _float_or_none(pricing.get("input_cache_write"))
+        if cache_write is not None:
+            entry["cache_creation_input_token_cost"] = cache_write
+
         ctx = m.get("context_length")
         if isinstance(ctx, int) and ctx > 0:
             entry["max_input_tokens"] = ctx
@@ -101,6 +105,10 @@ def main():
         entry["supports_response_schema"] = (
             "response_format" in params or "structured_outputs" in params
         )
+        entry["supports_reasoning"] = (
+            "reasoning" in params or "include_reasoning" in params
+        )
+        entry["supports_tool_choice"] = "tool_choice" in params
 
         fragment[f"{PROVIDER}/{mid}"] = entry
 

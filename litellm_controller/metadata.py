@@ -168,7 +168,7 @@ if __name__ == "__main__":
 def sync_example_scripts():
     """在程序启动或 MetadataManager 初始化时：
     1. 生成默认启用且优先级为 0 的 default.py（如果不存在）
-    2. 将内置 examples/*.py 复制到配置目录（默认禁用，不覆盖）
+    2. 将内置 examples/*.py 复制到配置目录（沿用模板各自的 ENABLED 默认值，不覆盖）
     """
     config_dir = get_config_dir()
     meta_dir = config_dir / "model_metadata"
@@ -195,8 +195,8 @@ def sync_example_scripts():
             try:
                 content = f.read_text(encoding="utf-8")
                 target.write_text(content, encoding="utf-8")
-                # 示例脚本同步后强制设为禁用，由用户手动开启
-                update_script_enabled(target, False)
+                # 模板头部的 ENABLED 即内置默认启用状态（demo 默认禁用，
+                # 官方价格基础层默认启用），此处不再强制覆盖。
                 if os.name != "nt":
                     try:
                         os.chmod(target, 0o755)
@@ -497,7 +497,7 @@ def blank_script_content(stem: str) -> str:
 
 
 def reset_examples(meta_dir: Path) -> int:
-    """将配置目录内的内置示例脚本重置为默认状态，返回重置数量。"""
+    """将配置目录内的内置示例脚本重置为模板默认状态（含各自 ENABLED/PRIORITY），返回重置数量。"""
     count = 0
     if EXAMPLES_DIR.exists():
         for ex in EXAMPLES_DIR.glob("*.py"):
@@ -505,7 +505,6 @@ def reset_examples(meta_dir: Path) -> int:
                 continue
             target = meta_dir / ex.name
             target.write_text(ex.read_text(encoding="utf-8"), encoding="utf-8")
-            update_script_enabled(target, False)
             if os.name != "nt":
                 try:
                     os.chmod(target, 0o755)
