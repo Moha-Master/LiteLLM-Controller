@@ -74,6 +74,16 @@ ENABLED = True
 ```
 脚本需将模型字典以 JSON 格式打印至 `stdout`，日志信息打印至 `stderr`。
 
+### Key 前缀归一
+
+脚本输出的模型 key 应遵循 `provider/model_id` 格式（如 `openrouter/deepseek/deepseek-chat`）。若 key 缺少 provider 前缀但条目包含 `litellm_provider` 字段，构建引擎会自动补全前缀后再合并，确保不会因前缀缺失产生重复条目：
+
+| 脚本输出 | litellm_provider | 归一结果 |
+|---|---|---|
+| `~deepseek/deepseek-flash-latest` | openrouter | → `openrouter/~deepseek/deepseek-flash-latest` |
+| `deepseek-chat` | deepseek | → `deepseek/deepseek-chat` |
+| `openrouter/deepseek/deepseek-chat` | openrouter | 不触发（已有前缀） |
+
 ## 开发
 
 本项目遵循 Python 3.10+ 规范。

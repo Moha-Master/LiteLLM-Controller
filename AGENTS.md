@@ -236,7 +236,7 @@ litellm_controller/
   client.py      LiteLLMError / LiteLLMClient（requests 封装 Proxy API）
   modeldata.py   模型格式化 / 排序 / cost 显示（纯函数）
   upstreams.py   Upstream 模型列表拉取（openai/anthropic/google 三种解析器）
-  metadata.py    参数引擎：脚本发现/执行、deep_merge、default.py 读写、导出（655 行核心）
+  metadata.py    参数引擎：脚本发现/执行、deep_merge、key 前缀归一、default.py 读写、导出（~670 行核心）
   examples/      内置示例脚本模板（同步到配置目录后默认禁用；ruff exclude）
   ui.py          界面骨架：PageScreen / logo 常量
   widgets.py     统一模态（含 litellm 特有 PickModal/MultiPickModal/browse 字段）+ 表格辅助
@@ -266,6 +266,7 @@ litellm_controller/
 - 配置目录优先级：`-D/--dir` > 环境变量 `LITELLM_CONTROLLER_CONFIG_DIR` > `~/.config/litellm-controller`；`main.py` 在导入 app 前写入环境变量。
 - `config.yaml`：`litellm{endpoint,key}`、`upstreams[{name,type,endpoint,key,provider?}]`、`model_metadata{output_file,amend_upstream{type,url}}`。
 - 参数脚本目录 `<config>/model_metadata/`：`default.py`（编辑器维护、ENABLED 恒真）+ 示例/自定义脚本（`# --- LITELLMCTL CONFIG ---` 头部 NAME/DESCRIPTION/PRIORITY/ENABLED），脚本 stdout 输出 JSON。
+- 脚本输出的 key 应遵循 `provider/model_id` 格式。若 key 缺少 provider 前缀但条目含 `litellm_provider` 字段，`build()` 会在内部自动补全前缀后再合并，防止因命名不一致产生重复条目。
 - 启动自动 `sync_example_scripts()`（已存在文件不覆盖）。
 
 ## 新增功能指引
@@ -284,6 +285,7 @@ litellm_controller/
 - 有搜索框的页面（Scripts/DefaultEditor）键位避开 `Ctrl+E/D`（§7.2）；`/` + `Ctrl+N` 为唯一新增入口，条目操作全部经模态表单。
 - 路由组写回遵循「读-改-写」：保存前 `get_router_settings` 重新拉最新 groups，避免覆盖他人改动。
 - `cost_map` 价格统一以 $/1M tokens 输入、`round(x/1e6, 12)` 存储。
+- `build()` 的 key 前缀归一：脚本输出的 key 若缺少 `provider/` 前缀但含 `litellm_provider` 字段，构建引擎在内部补全前缀后合并，确保不会因命名不一致产生重复条目（历史 bug：`~deepseek/deepseek-flash-latest` vs `openrouter/~deepseek/deepseek-flash-latest`）。
 - `ModelFormScreen` 包含内置模型名搜索框（`#mapping-search`）；在 `add` 模式下对已在代理上配置的模型名使用 warning 色高亮提醒，避免批量添加时冲突。
 - `GroupFormScreen`（路由组管理）自动从成员列表中排除已被其他路由组占用的模型（显示为 dim/disabled），保证模型归属排他性。
 - `Select` (Textual) 的 `prompt` 已包含空白项。当 `prompt` 为 `[不绑定 Credential]` 时，`options` 中无需手动追加 `("",)` 项，否则会出现重复。
