@@ -237,7 +237,7 @@ litellm_controller/
   modeldata.py   模型格式化 / 排序 / cost 显示（纯函数）
   upstreams.py   Upstream 模型列表拉取（openai/anthropic/google 三种解析器）
   metadata.py    参数引擎：脚本发现/执行、deep_merge、key 前缀归一、default.py 读写、导出（~670 行核心）
-  examples/      内置示例脚本模板（同步到配置目录后默认禁用；ruff exclude）
+  examples/      内置示例脚本模板（同步到配置目录后保留各自 ENABLED 值，已有文件不覆盖；ruff exclude）
   ui.py          界面骨架：PageScreen / logo 常量
   widgets.py     统一模态（含 litellm 特有 PickModal/MultiPickModal/browse 字段）+ 表格辅助
   app.tcss       全局样式（模态三段式、顶栏、filter-row、kv-row、home banner、状态栏）
