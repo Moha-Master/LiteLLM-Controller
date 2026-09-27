@@ -334,11 +334,11 @@ class MetadataManager:
                         deep_merge(data[nk], v)
                     else:
                         data[nk] = v
-                    to_pop.append(k)
-            for k in to_pop:
+                    to_pop.append((k, nk))
+            for k, nk in to_pop:
                 data.pop(k)
                 model_origin.pop(k, None)
-                logs.append(f"  前缀归一: [{k}] -> [{prov}/{k}]")
+                logs.append(f"  前缀归一: [{k}] -> [{nk}]")
             for k in data:
                 if k not in model_origin:
                     model_origin[k] = (meta, meta.priority)
