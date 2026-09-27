@@ -5,6 +5,7 @@
 import ast
 import copy
 import json
+import math
 import os
 import re
 import subprocess
@@ -389,6 +390,90 @@ class MetadataManager:
             "total": len(new_data),
         }
 
+    def push_to_proxy(self, data: dict[str, Any]) -> dict[str, Any]:
+        """将构建 map 中的价格/参数字段逐个推送到 Proxy 的 DB 存储模型。
+
+        - 仅为能在构建 map 中匹配到、且数值字段与现值有差异的 deployment 生成
+          PATCH /model/{id}/update（litellm_params 原样保留，只动 model_info）；
+        - 单个模型失败不中断整体，收集到 failed 列表。
+        返回 {"updated", "unchanged", "unmatched", "failed"}。
+        """
+        models = self.client.list_models()
+        matched = [m for m in models if _price_patch_for(m, data) is not None]
+        changed = _push_patches(data, models)
+        updated: list[str] = []
+        failed: list[str] = []
+        for name, mid, patch in changed:
+            try:
+                self.client.update_model(mid, model_info=patch)
+                updated.append(name)
+            except Exception as e:
+                failed.append(f"{name}: {e}")
+        return {
+            "updated": updated,
+            "unchanged": len(matched) - len(changed),
+            "unmatched": len(models) - len(matched),
+            "failed": failed,
+        }
+
+
+# ---------------------------------------------------------------- 推送价格数据到 Proxy
+
+# 条目中的非价格数值字段白名单排除项（litellm_provider/mode 等本就非数值，防御性列出）
+PUSH_SKIP_FIELDS = {"supported_endpoints", "required_params", "known_params"}
+
+
+def _price_patch_for(model: dict, data: dict) -> dict | None:
+    """deployment 在构建 map 中可推送的数值字段（价格 / token 上限 / rpm 等）。
+
+    匹配 key 依次尝试：litellm_params.model（与 map key 同构）、model_info.litellm_model、
+    公开名 model_name。未匹配到、或条目不含任何可推送字段（如别名条目）返回 None。
+    """
+    params = model.get("litellm_params") or {}
+    info = model.get("model_info") or {}
+    entry = None
+    for cand in (params.get("model"), info.get("litellm_model"), model.get("model_name")):
+        if cand and isinstance(data.get(cand), dict):
+            entry = data[cand]
+            break
+    if entry is None:
+        return None
+    patch = {
+        k: v
+        for k, v in entry.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and k not in PUSH_SKIP_FIELDS
+    }
+    return patch or None
+
+
+def _push_patches(data: dict, models: list[dict]) -> list[tuple[str, str, dict]]:
+    """计算需要推送的 (model_name, model_id, patch) 列表（纯函数，便于测试）。
+
+    未匹配到条目、无 model_info.id（config 来源模型）、与现值无差异的 deployment 均跳过。
+    """
+    result = []
+    for model in models:
+        patch = _price_patch_for(model, data)
+        if patch is None:
+            continue
+        mid = (model.get("model_info") or {}).get("id")
+        if not mid:
+            continue
+        info = model.get("model_info") or {}
+        diff = {k: v for k, v in patch.items() if not _same_number(info.get(k), v)}
+        if diff:
+            result.append((model.get("model_name", "?"), mid, diff))
+    return result
+
+
+def _same_number(old, new) -> bool:
+    """数值字段比较（float 用 isclose 防精度噪声；现值缺失/类型不符视为差异）。"""
+    if old is None:
+        return False
+    if isinstance(old, (int, float)) and not isinstance(old, bool):
+        return math.isclose(float(old), float(new), rel_tol=1e-9, abs_tol=1e-15)
+    return old == new
+
 
 # ---------------------------------------------------------------- 脚本执行与 default.py 读写
 
@@ -670,5 +755,18 @@ def generate_metadata(
     else:
         out_path = mgr.export(data, out_dir / OUTPUT_FILENAME)
     log(f"成功导出至: {out_path}")
+
+    if config["model_metadata"].get("auto_push"):
+        log("推送价格数据到 Proxy (model_metadata.auto_push)...")
+        result = mgr.push_to_proxy(data)
+        log(
+            f"  更新 {len(result['updated'])} · 无差异 {result['unchanged']}"
+            f" · 未匹配 {result['unmatched']} · 失败 {len(result['failed'])}"
+        )
+        for name in result["updated"]:
+            log(f"  ✓ {name}")
+        for item in result["failed"]:
+            log(f"  ✗ {item}")
+
     log("=" * 40)
     return out_path

@@ -33,6 +33,7 @@ def config_exists() -> bool:
 def get_default_model_metadata() -> dict:
     return {
         "output_file": None,
+        "auto_push": False,
         "amend_upstream": {
             "type": "off",
             "url": None,
@@ -89,6 +90,13 @@ def validate_model_metadata(meta: dict) -> dict:
         raise ValueError("model_metadata 必须是映射")
 
     # 未知配置项（如历史遗留的 provider 段）静默忽略，不参与任何逻辑
+
+    # auto_push：构建/导出成功后自动向 Proxy 推送价格数据（仅 YAML 维护）
+    auto_push = meta.get("auto_push")
+    if auto_push is None:
+        meta["auto_push"] = False
+    elif not isinstance(auto_push, bool):
+        raise ValueError("model_metadata.auto_push 必须是布尔值")
 
     # amend_upstream
     amend = meta.get("amend_upstream")

@@ -192,6 +192,32 @@ class BuildScreen(PageScreen):
             self.app.notify_ok(f"成功导出至: {path}")
         except Exception as e:
             self.app.notify_err(f"导出失败: {e}")
+            return
+        if self.app.config["model_metadata"].get("auto_push"):
+            await self._auto_push(mgr)
+
+    async def _auto_push(self, mgr: eng.MetadataManager) -> None:
+        """导出后按 model_metadata.auto_push 开关自动推送价格数据到 Proxy。"""
+        try:
+            async with busy(self.app, "正在推送价格数据到 Proxy…", mode="bar"):
+                result = await asyncio.to_thread(mgr.push_to_proxy, self._data)
+        except Exception as e:
+            self.app.notify_err(f"价格推送失败: {e}")
+            return
+        n_upd, n_fail = len(result["updated"]), len(result["failed"])
+        line = (
+            f"[自动推送] 更新 {n_upd} · 无差异 {result['unchanged']}"
+            f" · 未匹配 {result['unmatched']} · 失败 {n_fail}"
+        )
+        log_box = self.query_one("#build-log", TextArea)
+        log_box.load_text(f"{log_box.text}\n\n{line}\n" + "\n".join(
+            [f"  ✓ {name}" for name in result["updated"]] + [f"  ✗ {item}" for item in result["failed"]]
+        ).strip())
+        if n_fail:
+            self.app.notify_warn(f"价格推送完成，但有 {n_fail} 个模型失败（详见构建日志）")
+        else:
+            self.app.notify_ok(f"价格推送完成: 更新 {n_upd} · 无差异 {result['unchanged']}")
+        self.app.status(line)
 
 
 # ---------------------------------------------------------------- 脚本管理

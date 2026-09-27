@@ -259,13 +259,13 @@ litellm_controller/
 - 模型表单（sheet 模态，宽 104/高 90%）：Add/View/Edit 合一——Provider/Credential Select、映射行列表（Checkbox 批量 / RadioButton 单选）、状态 Switch（view 即改）、Collapsible 高级 JSON；底部标准按钮序 [取消][保存][删除]。
 - 路由页：`.panel` 两行 filter-row + ClickTable（策略列 shorten、模型数/状态 rcell）；组表单 sheet 模态含 SelectionList 成员勾选 + 搜索筛选。
 - 设置页：连接 `.panel`（kv 行 + [编辑连接]）→ Upstreams `.panel`（标题 + 添加/编辑/删除按钮）→ ClickTable（单击=编辑，一窗到底）；「重新配置并覆盖」进 ⋮ 折叠菜单。
-- 参数管理子系统（`screens/meta.py`）：MetaHome（OptionList 菜单页，1-3 直达）→ Build（JSON/日志双 TextArea、顶栏导出、Ctrl+R 重建）/ Scripts（`.panel` 搜索+排序+[＋ 新建脚本]，ClickTable 单击行弹 ScriptFormModal）/ DefaultEditor（搜索 + 保存/重置按钮、Esc 带回未保存确认）→ ModelMetaFormSheet（价格/特性/阶梯/自定义字段一窗到底，TierModal·CustomFieldsModal 子弹窗原地改 meta）。
+- 参数管理子系统（`screens/meta.py`）：MetaHome（OptionList 菜单页，1-3 直达）→ Build（JSON/日志双 TextArea、顶栏导出、Ctrl+R 重建；导出成功后若 `auto_push` 开启则自动推送价格到 Proxy 并把结果追加进构建日志）/ Scripts（`.panel` 搜索+排序+[＋ 新建脚本]，ClickTable 单击行弹 ScriptFormModal）/ DefaultEditor（搜索 + 保存/重置按钮、Esc 带回未保存确认）→ ModelMetaFormSheet（价格/特性/阶梯/自定义字段一窗到底，TierModal·CustomFieldsModal 子弹窗原地改 meta）。
 - 首启向导 `SetupWizardScreen`：模态串联 FormModal → UpstreamFormModal 循环 → SummaryModal（[取消][继续添加][保存并进入]）。
 
 ## 配置与文件
 
 - 配置目录优先级：`-D/--dir` > 环境变量 `LITELLM_CONTROLLER_CONFIG_DIR` > `~/.config/litellm-controller`；`main.py` 在导入 app 前写入环境变量。
-- `config.yaml`：`litellm{endpoint,key}`、`upstreams[{name,type,endpoint,key,provider?}]`、`model_metadata{output_file,amend_upstream{type,url}}`。
+- `config.yaml`：`litellm{endpoint,key}`、`upstreams[{name,type,endpoint,key,provider?}]`、`model_metadata{output_file,auto_push,amend_upstream{type,url}}`。`auto_push`（默认 false，仅 YAML 维护）= 构建导出成功后自动把 map 中的价格数值字段推送到 Proxy（`PATCH /model/{id}/update` 写 `model_info`，UI 与 `metadata-gen` 均生效）。
 - 参数脚本目录 `<config>/model_metadata/`：`default.py`（编辑器维护、ENABLED 恒真）+ 示例/自定义脚本（`# --- LITELLMCTL CONFIG ---` 头部 NAME/DESCRIPTION/PRIORITY/ENABLED），脚本 stdout 输出 JSON。
 - 脚本输出的 key 应遵循 `provider/model_id` 格式。若 key 缺少 provider 前缀但条目含 `litellm_provider` 字段，`build()` 会在内部自动补全前缀后再合并，防止因命名不一致产生重复条目。
 - 启动自动 `sync_example_scripts()`（已存在文件不覆盖）。
@@ -290,6 +290,7 @@ litellm_controller/
 - `ModelFormScreen` 包含内置模型名搜索框（`#mapping-search`）；在 `add` 模式下对已在代理上配置的模型名使用 warning 色高亮提醒，避免批量添加时冲突。
 - `GroupFormScreen`（路由组管理）自动从成员列表中排除已被其他路由组占用的模型（显示为 dim/disabled），保证模型归属排他性。
 - `Select` (Textual) 的 `prompt` 已包含空白项。当 `prompt` 为 `[不绑定 Credential]` 时，`options` 中无需手动追加 `("",)` 项，否则会出现重复。
+- 价格推送（`MetadataManager.push_to_proxy`）：LiteLLM **没有**整体上传 cost map 的端点（`/reload/model_cost_map` 只是重拉 `LITELLM_MODEL_COST_MAP_URL`），只能按 deployment 走 `PATCH /model/{id}/update` 写 `model_info`。匹配 key 依次试 `litellm_params.model` → `model_info.litellm_model` → 公开名；只推条目中的数值字段（价格/tier/max_tokens/rpm），与现值 `isclose` 相同则跳过；config.yaml 来源模型会被 API 拒绝、计入 failed 不中断。上游已知缺陷（litellm #25839）：部分字段（tier `above_Nk`、个别 cache 价）会被**静默丢弃**——请求仍 200、核心字段照常生效，不会整体失败；但注意 deployment 一旦带自定义价即脱离默认 map，tier 字段被丢时超长请求按基础价计费。
 - tests/ 目录为本项目历史保留（其余项目不提交测试文件）；UI 验证脚本在 `/tmp/opencode/litellm_ui_check.py`（54 断言，含脚本设置回写）。
 
 ## 依赖与质量
