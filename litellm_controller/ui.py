@@ -12,6 +12,7 @@ from rich.text import Text
 from textual import on
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Button, Input, OptionList, Static, TextArea
 
@@ -177,14 +178,25 @@ class PageScreen(Screen):
     # ------------------------------------------------------------ 标题 / 副标题
 
     def set_subtitle(self, text: str) -> None:
+        """更新顶栏副标题。
+
+        判定不能用 ``is_mounted``：`on_mount` 里它仍是 `False`（Textual 派发完
+        Mount 事件之后才置位），首屏副标题会永远停在空串。改为按顶栏控件是否
+        已组合判断：未组合时仅保存文本，交由 compose 使用。
+        """
         self.subtitle = text
-        if self.is_mounted:
+        try:
             self.query_one("#tb-sub", Static).update(text)
+        except NoMatches:
+            pass
 
     def set_title(self, text: str) -> None:
+        """更新顶栏标题；判定口径同 set_subtitle。"""
         self.TITLE = text
-        if self.is_mounted:
+        try:
             self.query_one(".tb-title", Static).update(Text(text, style="bold"))
+        except NoMatches:
+            pass
 
     # ------------------------------------------------------------ 折叠菜单
 

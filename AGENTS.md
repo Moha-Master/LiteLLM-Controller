@@ -175,6 +175,7 @@
 - `cell_len` 在 `rich.cells`（复数模块名）。
 - 自定义 `DataTable` 子类重写 `_on_click`：Textual 沿 MRO 逐类派发，接管与回落两条路径都要 `event.prevent_default()`，否则消息双发/双执行。
 - 屏幕方法不要命名 `_render`（覆盖 `Widget._render` 渲染崩溃）。
+- `on_mount` 回调里 `is_mounted` **仍是 `False`**（Textual 是派发完 Mount 事件**之后**才置位）：靠它守卫的写入会静默跳过（历史事故：`PageScreen.set_subtitle()` 写 `if self.is_mounted:` → 首屏顶栏副标题永远空白）。这类判定改用**控件是否已组合**（`try: query_one(...) except NoMatches: ...`）或 `call_after_refresh`，不要依赖 `is_mounted`。
 - **级联优先级**：app.tcss（含 Screen CSS）对同一属性**始终压过** widget 自身 `DEFAULT_CSS`，与选择器特异度无关——给通用控件写全局规则前，先 grep 各控件 DEFAULT_CSS 里对该控件的 width/padding 定制（历史事故：全局 `Button{padding:0 1}` 掀翻 MonthPicker 3 格小按钮，rich `chop_cells` 除零崩溃）。
 - `#topbar Button { margin }` 这类**后代选择器**会命中挂在顶栏里的组件内部按钮（MonthPicker 弹层等），且 id 前缀特异度压过 widget 类规则；顶栏间距规则必须限定到具体 id（`#topbar #top-back`）。
 - `OptionList` 的 `DEFAULT_CSS` 自带 `border: tall $border-blurred`（直角框）。放进 `.panel` 圆角容器时必须显式 `border: none; background: transparent`（如 `#mh-list`），否则容器内套一个直角方框。
