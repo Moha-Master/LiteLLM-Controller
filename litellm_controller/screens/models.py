@@ -1,4 +1,4 @@
-"""模型管理屏：列表（ClickTable + 模糊搜索 + 排序）、单击/回车进入表单、批量添加入口。
+"""模型管理屏：列表（ClickTable + 模糊搜索 + 排序）、双击/回车进入表单、批量添加入口。
 
 版式：内容区 = 小容器（.panel：搜索 / 排序 / 主操作按钮）+ 大容器（.tbl 表格，1fr 单滚动条）。
 操作结果通过 App 状态栏 + notify 反馈。
@@ -43,10 +43,10 @@ NAME_CAP = 24  # Public / LiteLLM 名称显示宽度上限
 
 
 class ModelListScreen(PageScreen):
-    """模型列表页：单击 / 回车进入模型详情（查看 / 编辑）。"""
+    """模型列表页：双击 / 回车进入模型详情（查看 / 编辑）。"""
 
     TITLE = "模型管理"
-    HINT = "↑↓ 移动 · 单击/回车 查看编辑 · Ctrl+N 添加 · / 搜索 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
+    HINT = "↑↓ 移动 · 双击/回车 查看编辑 · Ctrl+N 添加 · / 搜索 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
         Binding("/", "focus_search", "搜索", show=False),

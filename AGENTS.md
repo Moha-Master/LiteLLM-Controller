@@ -92,9 +92,9 @@
 | 功能页基类 PageScreen | `Esc`/`Ctrl+C` 返回、`Ctrl+R` 刷新、`Home/End/PgUp/PgDn` 滚动 | 同左 | 同左 | 同左 |
 | 首启 / 根屏 | `SetupWizardScreen`：`Enter` 提交、`Esc`/`Ctrl+C` 取消并退出 | `ProfileListScreen`：`↑↓` 移动、`Enter`/单击 连接、`1-9` 直连、`Ctrl+N/E/D` 增删改、`Ctrl+R` 刷新、`Esc`/`Ctrl+C` 退出 | `SetupWizardScreen`（模态向导）：`Enter` 提交、`Esc`/`Ctrl+C` 取消并退出 | `DashboardScreen`（看板即根屏）：`[`/`]` 切页、`g` 回总览、`1-9` 直达、`←→` 选列、`s` 排序、`Ctrl+R` 刷新、`Ctrl+S` 设置、`Esc/Ctrl+C` 退出；缺配置先弹 `SetupScreen` |
 | 主菜单 | `HomeScreen`：`↑↓`、`Enter`、`1-5` 直达、`Esc`/`Ctrl+C` 退出 | `HomeScreen`：`↑↓`、`Enter`、`1-4` 直达、`Esc`/`Ctrl+C` 退出（切换端点走菜单项 `4`） | `HomeScreen`：`↑↓`、`Enter`、`1-4` 直达、`Esc`/`Ctrl+C` 退出 | ➖ 无独立主菜单（看板即根屏） |
-| 列表页（带搜索） | `DomainListScreen` / `RecordListScreen`：`↑↓`、`Enter`/单击、`/` 搜索、`Ctrl+N/E/D`、`Ctrl+R`、`Esc` 返回 | `ConfigScreen`：同左但无搜索框故无 `/` | `ModelListScreen` / `RoutingListScreen`：`↑↓`、`Enter`/单击、`/` 搜索、`Ctrl+N`、`Ctrl+R`、`Esc` 返回；`DefaultEditorScreen`：`Ctrl+N`＋[保存/重置]按钮 | ➖ 无通用搜索列表页 |
+| 列表页（带搜索） | `DomainListScreen` / `RecordListScreen`：`↑↓`、`Enter`/双击、`/` 搜索、`Ctrl+N/E/D`、`Ctrl+R`、`Esc` 返回 | `ConfigScreen`：同左但无搜索框故无 `/` | `ModelListScreen` / `RoutingListScreen`：`↑↓`、`Enter`/双击、`/` 搜索、`Ctrl+N`、`Ctrl+R`、`Esc` 返回；`DefaultEditorScreen`：`Ctrl+N`＋[保存/重置]按钮 | ➖ 无通用搜索列表页 |
 | 监控 / 查看 | `TrafficScreen` / `SummaryScreen`：`◀▶` 切月、`Ctrl+R`、`Esc` 返回、滚轮浏览 | `OverviewScreen`：`↑↓/PgUp/PgDn` 滚动、`Ctrl+R`、`Esc` 返回（无账期故无 `◀▶`） | `BuildScreen`：`Ctrl+R` 重新构建、[导出 JSON] 按钮、`Esc` 返回 | 同首启/根屏（看板总览与模型 tab） |
-| 设置 | `SettingsScreen`：点击条目/`Enter` 开 FormModal 保存、`Esc` 返回 | `SettingsScreen`：`Tab` 轮切、`Enter` 操作控件即时生效、`Ctrl+R`（无保存动作） | `SettingsScreen`：单击/`Ctrl+E` 编辑 Upstream、`Ctrl+N/D`、`Esc` 返回；`ScriptsScreen`：`/` 搜索、`Ctrl+N` 新建、单击 开脚本设置 | `SettingsScreen`：Tabbed（常规/场景/对比组），单击选择，`[✎ 编辑/重命名]` 弹模态，`[🗑 删除]` 弹 ConfirmModal，`[💾 保存]` / `Esc` 放弃（有改动先确认） |
+| 设置 | `SettingsScreen`：点击条目/`Enter` 开 FormModal 保存、`Esc` 返回 | `SettingsScreen`：`Tab` 轮切、`Enter` 操作控件即时生效、`Ctrl+R`（无保存动作） | `SettingsScreen`：双击/`Ctrl+E` 编辑 Upstream、`Ctrl+N/D`、`Esc` 返回；`ScriptsScreen`：`/` 搜索、`Ctrl+N` 新建、双击 开脚本设置 | `SettingsScreen`：Tabbed（常规/场景/对比组），单击选择，`[✎ 编辑/重命名]` 弹模态，`[🗑 删除]` 弹 ConfirmModal，`[💾 保存]` / `Esc` 放弃（有改动先确认） |
 | 日志 | ➖ 无独立日志页 | `LogScreen`：`↑↓/PgUp/PgDn` 滚动、`Ctrl+R` 重载、`Esc` 返回 | ➖ 无独立日志页 | ➖ 无独立日志页（进度/状态走底部状态栏） |
 | 模态 | `Enter` 提交/确认、`Esc`/`Ctrl+C` 取消关闭、`Tab` 轮切字段 | 同左 | 同左；另有 `PickModal`（输入筛选 + 回车）与 sheet 式大表单（`ModelFormScreen` 等，按钮提交，无隐式回车） | 同左（SetupScreen、InputModal 重命名、ModelFormModal 动态定价、ConfirmModal 删除） |
 | 文本编辑（Input/TextArea） | 控件原生编辑键优先；`Ctrl+R` 刷新禁用；底部提示栏切 `EDIT_HINT` | 同左 | 同左 | 同左 |
@@ -119,10 +119,11 @@
 
 ## 8. 鼠标交互
 
-- **所有可操作行一律单击执行**：数据表用 `widgets.ClickTable`（`make_table()` 默认返回）。单击数据格 = 移光标 + 立即发 `RowSelected`；表头点击仍是 `HeaderSelected`。
-- 按钮/选项/入口同样单击触发；滚轮天然作用于光标下滚动容器。
+- **表格行单击只选中、双击才执行**：数据表用 `widgets.ClickTable`（`make_table()` 默认返回）。单击数据格 = 移光标并发 `RowHighlighted`（控制按钮据此刷新），**不发** `RowSelected`；同格 0.5s 内的第二次点击（`events.Click.chain >= 2`）才发 `RowSelected`，与 `Enter` 等价。表头点击仍是 `HeaderSelected`。
+- **例外：选择器表格**（选中即生效，如格式列表、主从列表的从属表）显式传 `activate="click"`，单击即发 `RowSelected`；无 `RowSelected` 处理器的表格不必关心该参数。
+- 按钮 / `OptionList` 菜单项仍单击触发（菜单语义，单击即确认）；滚轮天然作用于光标下滚动容器。
 - 行点击判定、浮层外点击判定一律用 `event.screen_x / screen_y`（冒泡到 Screen 的 `event.x/y` 是相对坐标）。
-- 单击即执行的高危操作必须仍有 ConfirmModal 把关。
+- 双击执行的高危操作必须仍有 ConfirmModal 把关；`HINT` 一律写「双击/回车 <动作>」，不得写「单击 <动作>」。
 
 ## 9. 表格规范
 
@@ -187,7 +188,7 @@
 
 - `App.run_test(size=(120, 40))` 宽屏 + `(LOGO_WIDTH+6 以下, 28)` 窄屏各跑一遍。
 - 配置目录指向 `tempfile.mkdtemp()`（写最小配置），服务层用 Fake 对象整体屏蔽网络。
-- 必测清单：各页挂载无异常；`#page.virtual_size.height <= container_size.height`（单滚动条）；表格列宽和 ≈ `region.width - 2` 且无横向溢出；单击行执行且**不重复压栈**；`Ctrl+N/E/D/R`；模态紧凑度（min-height/单行输入/行距/Tab 轮切/validator 拦截）；折叠菜单浮层开合与外部点击；Esc 层级（模态 > 菜单 > 返回）；窄终端 logo `-sm` 降级与列宽重算。
+- 必测清单：各页挂载无异常；`#page.virtual_size.height <= container_size.height`（单滚动条）；表格列宽和 ≈ `region.width - 2` 且无横向溢出；单击行只移光标、双击行执行且**不重复压栈**；`Ctrl+N/E/D/R`；模态紧凑度（min-height/单行输入/行距/Tab 轮切/validator 拦截）；折叠菜单浮层开合与外部点击；Esc 层级（模态 > 菜单 > 返回）；窄终端 logo `-sm` 降级与列宽重算。
 - 断言 API 坑：DOMQuery 计数用 `len(query)`（无 `.count()`）；滚动上限 `max_scroll_y`（无 `scroll_max`）；Pilot 无 `shift_tab()`，用 `pilot.press("shift+tab")`；Fake 服务要**带状态**（setter 改 getter 返回值）。
 
 ## 14. 跨项目组件对照
@@ -255,11 +256,11 @@ litellm_controller/
 ## 本项目界面实例（对第一部分规范的映射）
 
 - 主菜单：LITELLM logo（LOGO_WIDTH=47，窄于 53 降级）+ 4 菜单项 + 1-4 快捷键；根屏 `Esc`/`Ctrl+C` 退出。
-- 模型页：`.panel`（搜索 + 排序 Select + [＋ 添加模型][模型参数管理]）+ ClickTable；列权重 [24,24,12,14,14,8]，状态 rcell 着色；单击行 = 打开查看表单。
+- 模型页：`.panel`（搜索 + 排序 Select + [＋ 添加模型][模型参数管理]）+ ClickTable；列权重 [24,24,12,14,14,8]，状态 rcell 着色；双击行 = 打开查看表单。
 - 模型表单（sheet 模态，宽 104/高 90%）：Add/View/Edit 合一——Provider/Credential Select、映射行列表（Checkbox 批量 / RadioButton 单选）、状态 Switch（view 即改）、Collapsible 高级 JSON；底部标准按钮序 [取消][保存][删除]。
 - 路由页：`.panel` 两行 filter-row + ClickTable（策略列 shorten、模型数/状态 rcell）；组表单 sheet 模态含 SelectionList 成员勾选 + 搜索筛选。
-- 设置页：连接 `.panel`（kv 行 + [编辑连接]）→ Upstreams `.panel`（标题 + 添加/编辑/删除按钮）→ ClickTable（单击=编辑，一窗到底）；「重新配置并覆盖」进 ⋮ 折叠菜单。
-- 参数管理子系统（`screens/meta.py`）：MetaHome（OptionList 菜单页，1-3 直达）→ Build（JSON/日志双 TextArea、顶栏导出、Ctrl+R 重建；导出成功后若 `auto_push` 开启则自动推送价格到 Proxy 并把结果追加进构建日志）/ Scripts（`.panel` 搜索+排序+[＋ 新建脚本]，ClickTable 单击行弹 ScriptFormModal）/ DefaultEditor（搜索 + 保存/重置按钮、Esc 带回未保存确认）→ ModelMetaFormSheet（价格/特性/阶梯/自定义字段一窗到底，TierModal·CustomFieldsModal 子弹窗原地改 meta）。
+- 设置页：连接 `.panel`（kv 行 + [编辑连接]）→ Upstreams `.panel`（标题 + 添加/编辑/删除按钮）→ ClickTable（双击=编辑，一窗到底）；「重新配置并覆盖」进 ⋮ 折叠菜单。
+- 参数管理子系统（`screens/meta.py`）：MetaHome（OptionList 菜单页，1-3 直达）→ Build（JSON/日志双 TextArea、顶栏导出、Ctrl+R 重建；导出成功后若 `auto_push` 开启则自动推送价格到 Proxy 并把结果追加进构建日志）/ Scripts（`.panel` 搜索+排序+[＋ 新建脚本]，ClickTable 双击行弹 ScriptFormModal）/ DefaultEditor（搜索 + 保存/重置按钮、Esc 带回未保存确认）→ ModelMetaFormSheet（价格/特性/阶梯/自定义字段一窗到底，TierModal·CustomFieldsModal 子弹窗原地改 meta）。
 - 首启向导 `SetupWizardScreen`：模态串联 FormModal → UpstreamFormModal 循环 → SummaryModal（[取消][继续添加][保存并进入]）。
 
 ## 配置与文件
@@ -301,7 +302,7 @@ litellm_controller/
 ## 验证（本项目脚本）
 
 - 模板：`/tmp/opencode/litellm_ui_check.py`（54 断言）——`LITELLM_CONTROLLER_CONFIG_DIR` 指临时目录；`LiteLLMControllerApp.get_client` 整体替换为 FakeClient（models/router/cost map 全假数据）；`sync_example_scripts()` 后向 default.py 注入一条参数供编辑器断言。
-- 覆盖：根屏/各页挂载、单击行开表单且**不重复压栈**、browse「选择…」弹 PickModal 不误关表单并回填、`/` 搜索 + EDIT_HINT + 编辑态 Ctrl+R 禁用、列宽铺满、Esc 层级（表单 > 菜单 > 返回）、⋮ 折叠菜单开合、脚本单击启停、sheet 表单按钮标准序、窄终端（44 列）logo `-sm`、Ctrl+Q。
+- 覆盖：根屏/各页挂载、双击行开表单且**不重复压栈**、browse「选择…」弹 PickModal 不误关表单并回填、`/` 搜索 + EDIT_HINT + 编辑态 Ctrl+R 禁用、列宽铺满、Esc 层级（表单 > 菜单 > 返回）、⋮ 折叠菜单开合、脚本启用开关、sheet 表单按钮标准序、窄终端（44 列）logo `-sm`、Ctrl+Q。
 - 逻辑回归：`python -m pytest tests -q`（19 用例，含表单行交互与向导模态）。
 
 ## 提交

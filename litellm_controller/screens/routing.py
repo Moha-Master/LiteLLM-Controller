@@ -94,10 +94,10 @@ def group_validity(group: dict, models_by_name: dict):
 # ---------------------------------------------------------------- 列表页
 
 class RoutingListScreen(PageScreen):
-    """路由组列表：单击 / 回车进入组详情。"""
+    """路由组列表：双击 / 回车进入组详情。"""
 
     TITLE = "路由管理"
-    HINT = "↑↓ 移动 · 单击/回车 查看详情 · Ctrl+N 新建 · / 搜索 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
+    HINT = "↑↓ 移动 · 双击/回车 查看详情 · Ctrl+N 新建 · / 搜索 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
         Binding("/", "focus_search", "搜索", show=False),

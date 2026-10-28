@@ -302,10 +302,10 @@ class ScriptFormModal(FormModal):
 
 
 class ScriptsScreen(PageScreen):
-    """脚本管理：脚本完全来自配置目录，单击行进入统一的「脚本设置」表单。"""
+    """脚本管理：脚本完全来自配置目录，双击行进入统一的「脚本设置」表单。"""
 
     TITLE = "脚本管理"
-    HINT = "↑↓ 移动 · 单击/回车 脚本设置 · / 搜索 · Ctrl+N 新建 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
+    HINT = "↑↓ 移动 · 双击/回车 脚本设置 · / 搜索 · Ctrl+N 新建 · Ctrl+R 刷新 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
         Binding("/", "focus_search", "搜索", show=False),
@@ -442,7 +442,7 @@ class DefaultEditorScreen(PageScreen):
 
     TITLE = "编辑基本配置"
     SUBTITLE = "default.py"
-    HINT = "↑↓ 移动 · 单击/回车 编辑参数 · Ctrl+N 新增 · Ctrl+R 重载 · Esc/Ctrl+C 返回"
+    HINT = "↑↓ 移动 · 双击/回车 编辑参数 · Ctrl+N 新增 · Ctrl+R 重载 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
         Binding("ctrl+n", "add_entry", "新增", show=False),

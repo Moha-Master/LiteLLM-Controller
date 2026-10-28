@@ -1,4 +1,4 @@
-"""设置屏：LiteLLM 连接、Upstream 增删改（ClickTable 单击 = 编辑）、重置配置。
+"""设置屏：LiteLLM 连接、Upstream 增删改（ClickTable 双击 = 编辑）、重置配置。
 
 版式：连接信息 .panel（kv 行 + 编辑按钮）→ 操作 filter-row → Upstream 表格（单滚动条）；
 「重新配置并覆盖」为低频危险操作，放入顶栏 ⋮ 折叠菜单。
@@ -29,7 +29,7 @@ from .setup import UpstreamFormModal, build_upstream, fetch_known_providers_for,
 
 class SettingsScreen(PageScreen):
     TITLE = "设置"
-    HINT = "↑↓ 移动 · 单击/回车 编辑 Upstream · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Esc/Ctrl+C 返回"
+    HINT = "↑↓ 移动 · 双击/回车 编辑 Upstream · Ctrl+N 新增 · Ctrl+E 编辑 · Ctrl+D 删除 · Esc/Ctrl+C 返回"
 
     BINDINGS = [
         Binding("ctrl+n", "new_up", "新增", show=False),
